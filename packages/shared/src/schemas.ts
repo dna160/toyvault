@@ -405,7 +405,7 @@ export function formatIssues(error: z.ZodError): { path: string; message: string
 /** Minor fields below this confidence are listed under "Low-confidence fields". */
 export const LOW_FIELD_CONFIDENCE = 0.7;
 
-export const ReviewKind = z.enum(["flagged", "unverified", "low_confidence"]);
+export const ReviewKind = z.enum(["flagged", "low_confidence", "unverified", "twins"]);
 export type ReviewKind = z.infer<typeof ReviewKind>;
 
 export const ReviewQuery = z.object({
@@ -432,6 +432,11 @@ export const ReviewItem = z.object({
   reason: z.string().nullable(),
   identity_confidence: z.number().nullable(),
   low_fields: z.array(z.object({ field: z.string(), value: z.string(), confidence: z.number() })),
+  /** Up to 4 photos: the unit's own photos, or one per copy for product queues. */
+  photos: z.array(
+    z.object({ unit_id: UnitId, photo_id: PhotoId, thumb_url: z.string().nullable(), preview_url: z.string().nullable(), location_path: z.string() }),
+  ),
+  condition: z.string().nullable(),
   created_at: z.string(),
 });
 export type ReviewItem = z.infer<typeof ReviewItem>;
@@ -443,6 +448,7 @@ export const ReviewSummary = z.object({
   flagged: z.number().int(),
   unverified: z.number().int(),
   low_confidence: z.number().int(),
+  twins: z.number().int(),
   ambiguous_moves: z.number().int(),
   count_discrepancies: z.number().int(),
 });

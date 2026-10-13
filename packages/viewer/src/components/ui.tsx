@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { copyText } from "../lib/copy";
 import { crumbs } from "../lib/format";
 
 /** Locations always read as breadcrumbs, never as codes. */
@@ -43,11 +44,10 @@ export function Phrase({ text }: { text: string }) {
       type="button"
       className="phrase"
       title="Copy, then paste into Claude Desktop"
-      onClick={() => {
-        navigator.clipboard?.writeText(text).then(() => {
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1400);
-        });
+      onClick={async () => {
+        if (!(await copyText(text))) return;
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1400);
       }}
     >
       <span>{text}</span>

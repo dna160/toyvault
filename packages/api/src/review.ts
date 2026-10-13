@@ -21,16 +21,22 @@ import type { Storage } from "./storage.js";
 const FLAGGED = sql`u.status = 'active' AND u.needs_review`;
 const UNVERIFIED = sql`NOT c.verified AND NOT c.operator_corrected
   AND EXISTS (SELECT 1 FROM units x WHERE x.catalog_item_id = c.id AND x.status = 'active')`;
+// Products with two or more active copies and no QR label to tell them apart (labels arrive
+// with labels_print). A to-do, not a problem: twins are interchangeable for counts.
+const TWINS = sql`(SELECT count(*) FROM units x WHERE x.catalog_item_id = c.id AND x.status = 'active') >= 2
+  AND NOT EXISTS (SELECT 1 FROM units x JOIN id_reservations r ON r.unit_id = x.id
+                   WHERE x.catalog_item_id = c.id AND x.status = 'active')`;
 const LOW_CONFIDENCE = sql`u.status = 'active' AND NOT u.needs_review AND u.reviewed_at IS NULL AND NOT c.operator_corrected
   AND EXISTS (SELECT 1 FROM jsonb_each_text(c.field_confidence) f
                WHERE f.value::numeric > 0 AND f.value::numeric < ${LOW_FIELD_CONFIDENCE})`;
 
 export async function reviewSummary(db: DB): Promise<ReviewSummary> {
-  const r = await sql<{ flagged: number; unverified: number; low_confidence: number; count_discrepancies: number; ambiguous_moves: number }>`
+  const r = await sql<ReviewSummary>`
     SELECT
       (SELECT count(*) FROM units u WHERE ${FLAGGED})::int AS flagged,
       (SELECT count(*) FROM catalog_items c WHERE ${UNVERIFIED})::int AS unverified,
       (SELECT count(*) FROM units u JOIN catalog_items c ON c.id = u.catalog_item_id WHERE ${LOW_CONFIDENCE})::int AS low_confidence,
+      (SELECT count(*) FROM catalog_items c WHERE ${TWINS})::int AS twins,
       (SELECT count(*) FROM review_tasks WHERE status = 'open' AND kind IN ('unmatched_move_photo','found_elsewhere'))::int AS ambiguous_moves,
       (SELECT count(*) FROM review_tasks WHERE status = 'open' AND kind = 'count_discrepancy')::int AS count_discrepancies
   `.execute(db);
@@ -67,7 +73,7 @@ const thumbOf = (unitRef: RawBuilder<unknown>) => sql`(
 
 export async function listReviews(db: DB, storage: Storage, q: z.output<typeof ReviewQuery>): Promise<ReviewList> {
   let query;
-  if (q.kind === "unverified") {
+  if (q.kind === "unverified" || q.kind === "twins") {
     // One row per product: verifying it once covers every copy.
     query = sql<Row>`
       SELECT c.id AS subject_id, NULL AS review_id,
@@ -81,7 +87,7 @@ export async function listReviews(db: DB, storage: Storage, q: z.output<typeof R
              NULL AS reason, NULL AS identity_confidence, c.created_at,
              count(*) OVER () AS total
         FROM catalog_items c
-       WHERE ${UNVERIFIED}
+       WHERE ${q.kind === "unverified" ? UNVERIFIED : TWINS}
        ORDER BY unit_count DESC, c.id
        LIMIT ${q.limit} OFFSET ${q.offset}
     `;
@@ -102,14 +108,17 @@ export async function listReviews(db: DB, storage: Storage, q: z.output<typeof R
         LEFT JOIN unit_search s ON s.unit_id = u.id
         LEFT JOIN locations l ON l.id = s.location_id
        WHERE ${where}
-       ORDER BY u.identity_confidence ASC NULLS FIRST, u.id
+       ORDER BY u.created_at, u.id
        LIMIT ${q.limit} OFFSET ${q.offset}
     `;
   }
 
   const rows = (await query.execute(db)).rows;
+  const photos = await photosFor(db, storage, rows, q.kind);
   const items: ReviewItem[] = await Promise.all(
     rows.map(async (r) => ({
+      photos: photos.get(r.subject_id) ?? [],
+      condition: r.condition,
       kind: q.kind,
       subject_id: r.subject_id,
       review_id: r.review_id,
@@ -130,6 +139,37 @@ export async function listReviews(db: DB, storage: Storage, q: z.output<typeof R
     })),
   );
   return { kind: q.kind, total: Number(rows[0]?.total ?? 0), items };
+}
+
+/** A unit's own photos (up to 4), or for product queues the first photo of each copy. */
+async function photosFor(db: DB, storage: Storage, rows: Row[], kind: string) {
+  const perCopy = kind === "unverified" || kind === "twins";
+  const pairs = rows.flatMap((r) => (r.unit_ids ?? []).slice(0, 4).map((u) => [r.subject_id, u] as const));
+  const out = new Map<string, ReviewItem["photos"]>();
+  if (pairs.length === 0) return out;
+  const found = await sql<{ subject: string; unit_id: string; photo_id: string; thumb_key: string | null; preview_key: string | null; path: string | null; n: number }>`
+    SELECT x.subject, up.unit_id, p.id AS photo_id, p.thumb_key, p.preview_key, l.path,
+           row_number() OVER (PARTITION BY x.subject, up.unit_id ORDER BY up.role = 'intake' DESC, up.created_at, p.id)::int AS n
+      FROM unnest(${pairs.map((p) => p[0])}::text[], ${pairs.map((p) => p[1])}::text[]) AS x(subject, unit_id)
+      JOIN unit_photos up ON up.unit_id = x.unit_id
+      JOIN photos p ON p.id = up.photo_id
+      LEFT JOIN unit_search s ON s.unit_id = up.unit_id
+      LEFT JOIN locations l ON l.id = s.location_id
+  `.execute(db);
+  for (const f of found.rows) {
+    if (perCopy ? f.n > 1 : f.n > 4) continue;
+    const list = out.get(f.subject) ?? [];
+    list.push({
+      unit_id: f.unit_id,
+      photo_id: f.photo_id,
+      thumb_url: f.thumb_key ? await storage.presignGet(f.thumb_key) : null,
+      preview_url: f.preview_key ? await storage.presignGet(f.preview_key) : null,
+      location_path: f.path ?? "",
+    });
+    out.set(f.subject, list);
+  }
+  for (const list of out.values()) list.sort((a, b) => a.unit_id.localeCompare(b.unit_id) || a.photo_id.localeCompare(b.photo_id));
+  return out;
 }
 
 function lowFields(r: Row) {

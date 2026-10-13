@@ -74,8 +74,9 @@ export class ApiClient {
   reviews(kind: ReviewKind, limit = 20, offset = 0) {
     return this.request<ReviewList>("GET", `/v1/reviews?${query({ kind, limit, offset })}`);
   }
-  reviewUnit(unitId: string, body: UnitReviewRequest) {
-    return this.request<UnitReviewResult>("POST", `/v1/units/${encodeURIComponent(unitId)}/review`, body);
+  reviewUnit(id: string, body: UnitReviewRequest) {
+    const path = id.startsWith("RV-") ? `/v1/reviews/${encodeURIComponent(id)}/resolve` : `/v1/units/${encodeURIComponent(id)}/review`;
+    return this.request<UnitReviewResult>("POST", path, body);
   }
   updateCatalog(id: string, body: CatalogUpdateRequest) {
     return this.request<{ id: string; verified: boolean; operator_corrected: boolean; changed: string[] }>(

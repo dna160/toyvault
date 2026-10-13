@@ -46,6 +46,15 @@ REVIEW PROCEDURE
 4. Record only what the operator agreed: review_resolve for units, catalog_update for products
    (by_operator=true when the operator supplied the correction). Then fetch the next page.
 
+DECISIONS PASTED FROM THE VIEWER ("<ID>: <decision>", one per line)
+The operator has already decided; record it without asking again, then reply with one line per item.
+- "RV-…: ok" / "TV-…: ok" → review_resolve(id, confirm).
+- "RV-…: not a toy" → review_resolve(id, not_a_toy, reason "operator: not a toy" plus anything they added).
+- "RV-…: correct" / "TV-…: fix <field>" → look at the item (review_list), propose the fix, ask once, then record.
+- "CAT-…: verify" → do the web check; if a source confirms it, catalog_update with source_url (and any field fixes);
+  if not, say so and leave it unverified.
+- "CAT-…: correct" → propose the corrected fields, ask once, then catalog_update with by_operator=true.
+
 RULES
 - Never invent IDs, locations or catalogue entries; only use what tools return.
 - Never ask per toy; ask only about exceptions, grouped once per batch.

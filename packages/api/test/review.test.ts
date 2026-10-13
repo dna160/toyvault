@@ -32,6 +32,7 @@ describe("review lists", () => {
       flagged: 1,
       unverified: 3, // every product without a web source
       low_confidence: 1, // the flagged unit is listed under flagged only
+      twins: 0,
       ambiguous_moves: 0,
       count_discrepancies: 0,
     });
@@ -49,12 +50,25 @@ describe("review lists", () => {
     expect(unverified.items.every((i: { subject_id: string }) => i.subject_id.startsWith("CAT-"))).toBe(true);
     const low = (await get("/v1/reviews?kind=low_confidence")).json();
     expect(low.items[0]).toMatchObject({ subject_id: units.lowConf, low_fields: [{ field: "release_year", value: "2016", confidence: 0.5 }] });
+    expect(low.items[0].photos[0]).toMatchObject({ unit_id: units.lowConf, location_path: "Mirae › Office" });
+    expect(low.items[0].photos[0].preview_url).toBeTruthy();
+  });
+
+  it("lists products with unlabelled twins, one photo per copy", async () => {
+    const [a, b] = await registerUploaded(ctx, 2);
+    const first = (await intake(ctx, office, [extraction([a!], { item_name: "Twin fox", ocr_text: [] })])).json().listed[0];
+    await intake(ctx, office, [extraction([b!], { item_name: "Twin fox", catalog_item_id: first.catalog_item_id, ocr_text: [] })]);
+    const twins = (await get("/v1/reviews?kind=twins")).json();
+    expect(twins.total).toBe(1);
+    expect(twins.items[0]).toMatchObject({ subject_id: first.catalog_item_id, unit_count: 2 });
+    expect(twins.items[0].photos.map((p: { unit_id: string }) => p.unit_id)).toHaveLength(2);
   });
 });
 
 describe("resolving", () => {
-  it("disposes a unit that is not a toy and resolves its review", async () => {
-    const res = await post(`/v1/units/${units.carton}/review`, { action: "not_a_toy", reason: "empty shipping carton" });
+  it("disposes a unit that is not a toy and resolves its review (by RV- ID)", async () => {
+    const rv = (await get("/v1/reviews?kind=flagged")).json().items[0].review_id;
+    const res = await post(`/v1/reviews/${rv}/resolve`, { action: "not_a_toy", reason: "empty shipping carton" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ status: "disposed", resolved_reviews: [expect.stringMatching(/^RV-/)] });
     const again = await post(`/v1/units/${units.carton}/review`, { action: "not_a_toy", reason: "empty shipping carton" });
@@ -95,7 +109,7 @@ describe("resolving", () => {
   it("rejects review writes from a viewer session", async () => {
     const login = await ctx.app.inject({ method: "POST", url: "/auth/login", payload: { password: VIEWER_PASSWORD } });
     const cookie = String(login.headers["set-cookie"]).split(";")[0]!;
-    for (const url of [`/v1/units/${units.good}/review`, "/v1/catalog/CAT-000001"]) {
+    for (const url of [`/v1/units/${units.good}/review`, "/v1/catalog/CAT-000001", "/v1/reviews/RV-00001/resolve"]) {
       const res = await ctx.app.inject({ method: "POST", url, headers: { cookie }, payload: { action: "confirm" } });
       expect(res.statusCode, url).toBe(403);
     }

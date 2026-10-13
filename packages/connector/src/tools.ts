@@ -11,7 +11,6 @@ import {
   PhotoId,
   ReviewKind,
   THRESHOLDS,
-  UnitId,
 } from "@toyvault/shared";
 import { z } from "zod";
 import { ApiRequestError, RailwayUnreachableError } from "./api-client.js";
@@ -389,14 +388,15 @@ export function registerTools(server: McpServer, svc: ConnectorService) {
     {
       title: "Resolve a unit review",
       description:
-        "Record the operator's decision for one unit (TV-): 'confirm' (it is right as listed), 'correct' (relink it " +
+        "Record the operator's decision for one unit, by its review ID (RV-) or unit ID (TV-): 'confirm' (it is right " +
+        "as listed), 'correct' (relink it " +
         "to another catalogue item with catalog_item_id and/or fix condition or notes), or 'not_a_toy' (dispose it " +
         "with a reason, e.g. an empty shipping carton; it moves to Disposed and nothing is deleted). Clears its flag " +
         "and resolves its open reviews. To fix or verify the product itself (name, series, source), use " +
         "catalog_update instead. Only record decisions the operator agreed to. " +
         NO_INVENTED_IDS,
       inputSchema: {
-        unit_id: UnitId,
+        id: z.string().regex(/^(RV-\d{5,}|TV-\d{6,})$/, "an RV- or TV- ID from review_list or the viewer"),
         action: z.enum(["confirm", "correct", "not_a_toy"]),
         catalog_item_id: CatalogId.optional(),
         condition: z.enum(CONDITIONS).optional(),
@@ -404,7 +404,7 @@ export function registerTools(server: McpServer, svc: ConnectorService) {
         reason: z.string().optional().describe("Required for not_a_toy; optional note for the audit log otherwise"),
       },
     },
-    ({ unit_id, ...body }) => run(async () => [text(await svc.reviewUnit(unit_id, body))]),
+    ({ id, ...body }) => run(async () => [text(await svc.reviewUnit(id, body))]),
   );
 
   server.registerTool(

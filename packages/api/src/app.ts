@@ -180,6 +180,11 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       v1.post<{ Params: { id: string } }>("/units/:id/review", async (req) =>
         reviewUnit(db, req.params.id, UnitReviewRequest.parse(req.body)),
       );
+      v1.post<{ Params: { id: string } }>("/reviews/:id/resolve", async (req) => {
+        const task = await db.selectFrom("review_tasks").select("unit_id").where("id", "=", req.params.id).executeTakeFirst();
+        if (!task?.unit_id) throw new HttpError(404, "not_found", `unknown review ${req.params.id}`);
+        return reviewUnit(db, task.unit_id, UnitReviewRequest.parse(req.body));
+      });
       v1.post<{ Params: { id: string } }>("/catalog/:id", async (req) =>
         updateCatalog(db, req.params.id, CatalogUpdateRequest.parse(req.body)),
       );
