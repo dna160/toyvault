@@ -163,6 +163,67 @@ describe("golden path: inbox → connector → API → Postgres", () => {
     expect(result!.sheet).toBeInstanceOf(Buffer);
   });
 
+  it("reuses the catalogue, finds units by search, and undoes a batch", async () => {
+    // Claude saves a product after its web check, then a second photo reuses it.
+    const saved = await svc.saveCatalog({
+      category: "Die-cast vehicle",
+      brand: "INNO Models",
+      franchise: "",
+      series: "INNO64",
+      wave: "",
+      item_name: "Liberty Walk F40",
+      model_number: "IN64-LBWK-F40",
+      barcode: "",
+      scale: "1:64",
+      release_year: 2023,
+      release_year_source: "web",
+      source_url: "https://example.com/inno64-f40",
+      field_confidence: {},
+    });
+    const again = await svc.saveCatalog({
+      category: "Die-cast vehicle",
+      brand: "inno models",
+      franchise: "",
+      series: "INNO64",
+      wave: "",
+      item_name: "Liberty Walk F40",
+      model_number: "IN64 LBWK F40",
+      barcode: "",
+      scale: "1:64",
+      release_year: 2023,
+      release_year_source: "web",
+      source_url: "https://example.com/inno64-f40",
+      field_confidence: {},
+    });
+    expect(again.id).toBe(saved.id);
+    expect((await svc.findCatalog({ model_number: "in64-lbwk-f40" })).items[0]!.id).toBe(saved.id);
+
+    writeInbox(root, "2026-10-21", {
+      "f40-a.jpg": await toyPhoto({ color: "#1b1b1b", label: "F40", shift: 120 }),
+      "f40-b.jpg": await toyPhoto({ color: "#eeeeee", label: "F40 #2", shift: 420 }),
+    });
+    const batch = await svc.nextBatch("2026-10-21");
+    const shelf = await svc.resolveLocation("Mirae › Office");
+    const receipt = await svc.createUnits({
+      folder: "2026-10-21",
+      location_id: shelf.id,
+      extractions: batch.photos.map((p) =>
+        stub([p.photo_id], { item_name: "Liberty Walk F40", series: "INNO64", catalog_item_id: saved.id }),
+      ),
+    });
+    expect(receipt.listed.map((l) => l.catalog_item_id)).toEqual([saved.id, saved.id]);
+
+    const found = await svc.search({ q: "liberty walk", limit: 10 });
+    expect(found.result.total).toBe(2);
+    expect(found.result.hits[0]!.location_path).toBe("Mirae › Office");
+    expect(found.sheet).toBeInstanceOf(Buffer);
+
+    const undone = await svc.undoBatch(receipt.batch_id);
+    expect(undone.disposed_units.sort()).toEqual(receipt.listed.map((l) => l.unit_id).sort());
+    expect((await svc.search({ q: "liberty walk" })).result.total).toBe(0);
+    expect((await checkIntegrity(ctx.db)).ok).toBe(true);
+  });
+
   it("fails cleanly when Railway is unreachable and leaves photos in the inbox", async () => {
     writeInbox(root, "2026-10-20", { "x.jpg": await toyPhoto({ color: "#aa2222", label: "TANK" }) });
     const offline = new ConnectorService(config("http://127.0.0.1:9"), new ApiClient("http://127.0.0.1:9", TOKEN));

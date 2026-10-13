@@ -16,6 +16,8 @@ export interface MovementInput {
   method?: MovementsTable["method"];
   reason?: string;
   idempotencyKey: string;
+  /** Set on compensating movements written by undo. */
+  compensatesMovementId?: string;
 }
 
 /**
@@ -63,6 +65,7 @@ export async function recordMovement(trx: Trx, m: MovementInput): Promise<{ id: 
       method: m.method ?? null,
       reason: m.reason ?? null,
       idempotency_key: m.idempotencyKey,
+      compensates_movement_id: m.compensatesMovementId ?? null,
     })
     .returning("id")
     .executeTakeFirstOrThrow();
@@ -86,7 +89,26 @@ export async function recordMovement(trx: Trx, m: MovementInput): Promise<{ id: 
     )
     .execute();
 
+  await refreshSearchFor(trx, subjectType, subjectId);
   return { id: inserted.id, replayed: false };
+}
+
+/** Keep the search document (which includes the location path) in step with the move. */
+async function refreshSearchFor(trx: Trx, subjectType: "unit" | "container", subjectId: string) {
+  if (subjectType === "unit") {
+    await sql`SELECT refresh_unit_search(ARRAY[${subjectId}]::text[])`.execute(trx);
+    return;
+  }
+  await sql`
+    WITH RECURSIVE inside AS (
+      SELECT subject_type, subject_id FROM stock_position WHERE container_id = ${subjectId}
+      UNION
+      SELECT sp.subject_type, sp.subject_id FROM stock_position sp
+        JOIN inside i ON i.subject_type = 'container' AND sp.container_id = i.subject_id
+    )
+    SELECT refresh_unit_search(coalesce(array_agg(subject_id) FILTER (WHERE subject_type = 'unit'), '{}'))
+      FROM inside
+  `.execute(trx);
 }
 
 /** Reject putting a container inside itself or inside one of its own descendants. */

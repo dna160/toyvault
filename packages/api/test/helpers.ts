@@ -33,11 +33,20 @@ export interface TestContext {
   storage: MemoryStorage;
 }
 
+export const VIEWER_PASSWORD = "viewer-password-for-tests";
+export const SESSION_SECRET = "session-secret-for-tests-0123456789abcdef";
+
 export async function setup(storage: Storage = new MemoryStorage()): Promise<TestContext> {
   const db = createDb(TEST_DATABASE_URL);
   await sql`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`.execute(db);
   await migrateToLatest(db);
-  const app = await buildApp({ db, storage, connectorToken: TOKEN });
+  const app = await buildApp({
+    db,
+    storage,
+    connectorToken: TOKEN,
+    viewerPassword: VIEWER_PASSWORD,
+    sessionSecret: SESSION_SECRET,
+  });
   return { db, app, storage: storage as MemoryStorage };
 }
 

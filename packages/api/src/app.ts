@@ -1,33 +1,63 @@
-import { timingSafeEqual } from "node:crypto";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import fastifyStatic from "@fastify/static";
 import {
   CandidatesQuery,
+  CatalogFindQuery,
+  CatalogSaveRequest,
   IntakeBatchRequest,
   LocationResolveRequest,
   PhotoRegisterRequest,
   PresignRequest,
+  SearchQuery,
   formatIssues,
 } from "@toyvault/shared";
-import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import { sql } from "kysely";
-import { ZodError, type z } from "zod";
+import { ZodError, z } from "zod";
+import {
+  type AuthConfig,
+  LoginLimiter,
+  checkPassword,
+  clearSession,
+  issueSession,
+  principalOf,
+  requireReader,
+  requireWriter,
+} from "./auth.js";
 import { findCandidates } from "./candidates.js";
+import { findCatalog, saveCatalog } from "./catalog.js";
 import { type DB, phashToBits } from "./db.js";
 import { HttpError } from "./errors.js";
 import { commitIntakeBatch } from "./intake.js";
 import { resolveLocationPath } from "./locations.js";
+import { getBatchReceipt, listBatches, locationTree, stats } from "./reads.js";
+import { searchUnits } from "./search.js";
 import { type Storage, photoKeys } from "./storage.js";
+import { undoBatch } from "./undo.js";
 import { getUnitDetail } from "./units.js";
 
 export interface AppOptions {
   db: DB;
   storage: Storage;
   connectorToken: string;
+  viewerPassword?: string;
+  sessionSecret?: string;
+  secureCookies?: boolean;
+  /** Built viewer (packages/viewer/dist). Served at / when present. */
+  viewerDist?: string;
   logger?: boolean;
 }
 
 export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   const { db, storage } = opts;
-  const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 5 * 1024 * 1024 });
+  const auth: AuthConfig = {
+    connectorToken: opts.connectorToken,
+    viewerPassword: opts.viewerPassword,
+    sessionSecret: opts.sessionSecret,
+    secureCookies: opts.secureCookies,
+  };
+  const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 5 * 1024 * 1024, trustProxy: true });
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof ZodError) {
@@ -49,18 +79,37 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     return { ok: true };
   });
 
-  app.get("/", async (_req, reply) => {
-    reply.type("text/html").send(LANDING_HTML);
+  // ---------- Viewer session ----------
+  const limiter = new LoginLimiter();
+  app.post("/auth/login", async (req, reply) => {
+    if (!limiter.allow(req.ip)) throw new HttpError(429, "too_many_attempts", "too many attempts; try again in 15 minutes");
+    const { password } = z.object({ password: z.string().max(200) }).parse(req.body);
+    if (!checkPassword(password, auth)) throw new HttpError(401, "unauthorized", "wrong password");
+    issueSession(reply, auth);
+    return { ok: true, scope: "read" };
+  });
+  app.post("/auth/logout", async (_req, reply) => {
+    clearSession(reply, auth);
+    return { ok: true };
+  });
+  app.get("/auth/me", async (req) => {
+    const p = principalOf(req, auth);
+    if (!p) throw new HttpError(401, "unauthorized", "not signed in");
+    return { principal: p, scope: p === "viewer" ? "read" : "write" };
   });
 
-  // Everything under /v1 is connector-only in Phase 1 (viewer sessions arrive in Phase 2,
-  // with a read-only scope that write routes reject).
+  // ---------- API ----------
   await app.register(
     async (v1) => {
-      v1.addHook("onRequest", async (req) => requireConnector(req, opts.connectorToken));
+      // Every route declares whether it reads or writes; writes reject viewer sessions.
+      v1.addHook("onRequest", async (req) => {
+        if (req.method === "GET" || req.method === "HEAD") requireReader(req, auth);
+        else requireWriter(req, auth);
+      });
 
+      // Writes (connector only)
       v1.post("/photos", async (req) => {
-        const body = parse(PhotoRegisterRequest, req.body);
+        const body = PhotoRegisterRequest.parse(req.body);
         const results = [];
         for (const p of body.photos) {
           const row = await sql<{ id: string; upload_status: "registered" | "uploaded" }>`
@@ -89,7 +138,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       });
 
       v1.post("/photos/presign", async (req) => {
-        const body = parse(PresignRequest, req.body);
+        const body = PresignRequest.parse(req.body);
         const out = [];
         for (const p of body.photos) {
           const keys = photoKeys(p.photo_id, p.original_content_type);
@@ -120,56 +169,45 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
         return { photos: out };
       });
 
-      v1.post("/locations/resolve", async (req) => {
-        const body = parse(LocationResolveRequest, req.body);
-        return resolveLocationPath(db, body.path);
-      });
+      v1.post("/locations/resolve", async (req) => resolveLocationPath(db, LocationResolveRequest.parse(req.body).path));
+      v1.post("/intake-batches", async (req) => commitIntakeBatch(db, storage, IntakeBatchRequest.parse(req.body)));
+      v1.post("/catalog", async (req) => saveCatalog(db, CatalogSaveRequest.parse(req.body)));
+      v1.post<{ Params: { id: string } }>("/batches/:id/undo", async (req) => undoBatch(db, req.params.id));
 
-      v1.post("/intake-batches", async (req) => {
-        const body = parse(IntakeBatchRequest, req.body);
-        return commitIntakeBatch(db, storage, body);
-      });
-
-      v1.get("/candidates", async (req) => {
-        const query = parse(CandidatesQuery, req.query);
-        return findCandidates(db, storage, query);
-      });
-
+      // Reads (connector or viewer)
+      v1.get("/search", async (req) => searchUnits(db, storage, SearchQuery.parse(req.query)));
+      v1.get("/catalog", async (req) => findCatalog(db, CatalogFindQuery.parse(req.query)));
+      v1.get("/candidates", async (req) => findCandidates(db, storage, CandidatesQuery.parse(req.query)));
       v1.get<{ Params: { id: string } }>("/units/:id", async (req) => getUnitDetail(db, storage, req.params.id));
+      v1.get("/locations/tree", async () => locationTree(db));
+      v1.get("/batches", async (req) => {
+        const q = z
+          .object({ limit: z.coerce.number().int().min(1).max(200).default(50), offset: z.coerce.number().int().min(0).default(0) })
+          .parse(req.query);
+        return listBatches(db, storage, q.limit, q.offset);
+      });
+      v1.get<{ Params: { id: string } }>("/batches/:id", async (req) => getBatchReceipt(db, req.params.id));
+      v1.get("/stats", async () => stats(db));
     },
     { prefix: "/v1" },
   );
 
+  // ---------- Viewer (static, read-only) ----------
+  const dist = opts.viewerDist;
+  if (dist && existsSync(join(dist, "index.html"))) {
+    await app.register(fastifyStatic, { root: dist, wildcard: false, index: ["index.html"] });
+    // Client-side routes fall back to index.html; API and auth paths keep their 404s.
+    app.setNotFoundHandler((req, reply) => {
+      if (req.method === "GET" && !/^\/(v1|auth|healthz)(\/|$)/.test(req.url)) return reply.sendFile("index.html");
+      return reply.code(404).send({ error: "not_found", message: `no route for ${req.method} ${req.url}` });
+    });
+  } else {
+    app.get("/", async (_req, reply) => reply.type("text/html").send(LANDING_HTML));
+  }
+
   return app;
 }
 
-function parse<S extends z.ZodType>(schema: S, value: unknown): z.output<S> {
-  return schema.parse(value);
-}
-
-function requireConnector(req: FastifyRequest, token: string) {
-  const header = req.headers.authorization ?? "";
-  const presented = header.startsWith("Bearer ") ? header.slice(7) : "";
-  const a = Buffer.from(presented);
-  const b = Buffer.from(token);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
-    throw new HttpError(401, "unauthorized", "a valid connector token is required");
-  }
-}
-
-const LANDING_HTML = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ToyVault</title>
-<style>
-  :root { --bg:#f7f4ee; --ink:#161513; --muted:#6b665d; --accent:#ff5a1f; }
-  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 "IBM Plex Sans", system-ui, sans-serif; }
-  main { max-width:560px; margin:12vh auto; padding:0 16px; }
-  h1 { font-size:28px; margin:0 0 8px; } h1 span { color:var(--accent); }
-  p { color:var(--muted); margin:0 0 12px; }
-  code { font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:14px; }
-</style></head>
-<body><main>
-  <h1>Toy<span>Vault</span></h1>
-  <p>The ledger API is running. Data enters only through Claude Desktop.</p>
-  <p>The read-only viewer arrives in Phase 2. Health: <code><a href="/healthz">/healthz</a></code></p>
-</main></body></html>`;
+const LANDING_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ToyVault</title></head>
+<body style="font:16px system-ui;background:#f7f4ee;color:#161513;padding:12vh 16px;max-width:560px;margin:auto">
+<h1>ToyVault</h1><p>The ledger API is running. The viewer build was not found on this server.</p></body></html>`;

@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { buildApp } from "./app.js";
 import { createDb } from "./db.js";
 import { loadEnv } from "./env.js";
@@ -14,6 +15,10 @@ console.log(JSON.stringify({ level: "info", msg: "migrations applied", applied }
 const app = await buildApp({
   db,
   connectorToken: env.CONNECTOR_TOKEN,
+  viewerPassword: env.VIEWER_PASSWORD,
+  sessionSecret: env.SESSION_SECRET,
+  secureCookies: process.env.NODE_ENV === "production",
+  viewerDist: env.VIEWER_DIST ?? fileURLToPath(new URL("../../viewer/dist", import.meta.url)),
   logger: true,
   storage: new S3Storage({
     endpoint: env.S3_ENDPOINT,

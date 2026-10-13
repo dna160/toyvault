@@ -1,5 +1,10 @@
 import type {
   CandidatesResponse,
+  CatalogItem,
+  CatalogSaveRequest,
+  SearchQueryInput,
+  SearchResponse,
+  UndoResult,
   IntakeBatchRequest,
   IntakeReceipt,
   LocationResolveResponse,
@@ -46,8 +51,19 @@ export class ApiClient {
     return this.request<IntakeReceipt>("POST", "/v1/intake-batches", body);
   }
   candidates(params: Record<string, string | undefined>) {
-    const qs = new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => !!e[1]));
-    return this.request<CandidatesResponse>("GET", `/v1/candidates?${qs}`);
+    return this.request<CandidatesResponse>("GET", `/v1/candidates?${query(params)}`);
+  }
+  findCatalog(params: { model?: string; barcode?: string; q?: string; limit?: number }) {
+    return this.request<{ items: CatalogItem[] }>("GET", `/v1/catalog?${query(params)}`);
+  }
+  saveCatalog(body: CatalogSaveRequest) {
+    return this.request<{ id: string; created: boolean }>("POST", "/v1/catalog", body);
+  }
+  search(params: SearchQueryInput) {
+    return this.request<SearchResponse>("GET", `/v1/search?${query(params)}`);
+  }
+  undoBatch(batchId: string) {
+    return this.request<UndoResult>("POST", `/v1/batches/${encodeURIComponent(batchId)}/undo`, {});
   }
 
   /** Upload bytes to a presigned bucket URL (with the same retry policy). */
@@ -110,3 +126,10 @@ export class ApiClient {
 }
 
 class RetryableError extends Error {}
+
+function query(params: object): URLSearchParams {
+  const entries = Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && v.length === 0))
+    .map(([k, v]) => [k, Array.isArray(v) ? v.join(",") : String(v)] as [string, string]);
+  return new URLSearchParams(entries);
+}

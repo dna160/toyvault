@@ -2,11 +2,14 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   type Candidate,
+  type CatalogSaveRequest,
   type Extraction,
   IMAGE_DEFAULTS,
   ID_PATTERNS,
   type IntakeReceipt,
   type PhotoRegisterResponse,
+  type SearchQueryInput,
+  type SearchResponse,
 } from "@toyvault/shared";
 import { ApiRequestError, type ApiClient } from "./api-client.js";
 import type { ConnectorConfig } from "./config.js";
@@ -84,6 +87,38 @@ export class ConnectorService {
 
   resolveLocation(path: string) {
     return this.api.resolveLocation(path);
+  }
+
+  findCatalog(params: { model_number?: string; barcode?: string; text?: string }) {
+    return this.api.findCatalog({ model: params.model_number, barcode: params.barcode, q: params.text });
+  }
+
+  /** catalog_save: the key is derived from the normalised fields so a retry never duplicates. */
+  saveCatalog(fields: Omit<CatalogSaveRequest, "client_key">, idempotencyKey?: string) {
+    const norm = (v: unknown) => String(v ?? "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+    const key =
+      idempotencyKey ??
+      `catalog:${createHash("sha256")
+        .update([fields.category, fields.brand, fields.series, fields.wave, fields.item_name, fields.model_number].map(norm).join("|"))
+        .digest("hex")
+        .slice(0, 32)}`;
+    return this.api.saveCatalog({ ...fields, client_key: key });
+  }
+
+  async search(params: SearchQueryInput): Promise<{ result: SearchResponse; sheet: Buffer | null }> {
+    const result = await this.api.search(params);
+    const shown = result.hits.slice(0, IMAGE_DEFAULTS.contactSheetMaxTiles);
+    if (shown.length === 0) return { result, sheet: null };
+    const images = await mapLimit(shown, CONCURRENCY, (h) => (h.thumb_url ? this.api.download(h.thumb_url) : Promise.resolve(null)));
+    const sheet = await contactSheet(
+      shown.map((h, i) => ({ label: h.unit_id, image: images[i] ?? null })),
+      { title: `${result.total} result${result.total === 1 ? "" : "s"}` },
+    );
+    return { result, sheet };
+  }
+
+  undoBatch(batchId: string) {
+    return this.api.undoBatch(batchId);
   }
 
   async nextBatch(folder: string, size = this.cfg.batchSize, maxPx = this.cfg.previewPx): Promise<NextBatchResult> {

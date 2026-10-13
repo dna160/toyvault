@@ -9,6 +9,9 @@ const Env = z.object({
   S3_REGION: z.string().default("auto"),
   S3_ACCESS_KEY_ID: z.string().min(1),
   S3_SECRET_ACCESS_KEY: z.string().min(1),
+  VIEWER_PASSWORD: z.string().min(12, "VIEWER_PASSWORD must be at least 12 characters").optional(),
+  SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters").optional(),
+  VIEWER_DIST: z.string().optional(),
   S3_FORCE_PATH_STYLE: z
     .string()
     .default("false")

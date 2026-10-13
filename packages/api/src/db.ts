@@ -36,6 +36,7 @@ export interface CatalogItemsTable {
   source_url: string | null;
   verified: Generated<boolean>;
   field_confidence: Json<Record<string, number>>;
+  client_key: string | null;
   created_at: Timestamp;
 }
 
@@ -50,6 +51,8 @@ export interface BatchesTable {
   receipt: Json<unknown> | null;
   status: Generated<"committed" | "undone">;
   client_key: string;
+  undone_at: Timestamp | null;
+  undo_receipt: Json<unknown> | null;
   created_at: Timestamp;
 }
 
@@ -118,6 +121,7 @@ export interface MovementsTable {
   method: "qr" | "text" | "visual" | "manual" | "carton" | null;
   reason: string | null;
   idempotency_key: string;
+  compensates_movement_id: string | null;
   created_at: Timestamp;
 }
 
@@ -149,6 +153,13 @@ export interface ReviewTasksTable {
   resolved_at: Timestamp | null;
 }
 
+export interface UnitSearchTable {
+  unit_id: string;
+  location_id: string | null;
+  doc: string;
+  updated_at: Timestamp;
+}
+
 export interface Database {
   locations: LocationsTable;
   containers: ContainersTable;
@@ -162,6 +173,7 @@ export interface Database {
   stock_position: StockPositionTable;
   unit_current_location: UnitCurrentLocationView;
   review_tasks: ReviewTasksTable;
+  unit_search: UnitSearchTable;
 }
 
 export type DB = Kysely<Database>;

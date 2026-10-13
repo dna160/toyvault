@@ -6,3 +6,7 @@ dist/
 *.log
 .DS_Store
 coverage/
+
+# Operator photos never belong in the repo
+/inbox/
+/processed/

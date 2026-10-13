@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { CATEGORIES, CONDITIONS, Extraction, LocationId, PhotoId, THRESHOLDS } from "@toyvault/shared";
+import { BatchId, CATEGORIES, CONDITIONS, Extraction, LocationId, PhotoId, THRESHOLDS } from "@toyvault/shared";
 import { z } from "zod";
 import { ApiRequestError, RailwayUnreachableError } from "./api-client.js";
 import { type ConnectorService, ToolInputError } from "./service.js";
@@ -128,7 +128,9 @@ export function registerTools(server: McpServer, svc: ConnectorService) {
         "Intake: record one extraction per physical toy from the current batch as new units at the location, " +
         "atomically. Every photo of the batch must appear in an extraction's photo_ids or in skipped_photo_ids. " +
         "Several photos of the same toy go in ONE extraction; a group shot showing several toys appears in several " +
-        "extractions. A second copy of a known toy is simply another unit (pass the existing catalog_item_id). " +
+        "extractions. Always set catalog_item_id: use the CAT- ID from catalog_find when the product is already known, " +
+        "or from catalog_save after your web check for a new product. Only pass null when you could not identify the " +
+        "product at all. A second copy of a known toy is simply another unit on the same catalog_item_id; do not ask. " +
         `Set needs_review only when identity_confidence < ${THRESHOLDS.intakeReview} after your web check, or the ` +
         "category is unclear; low confidence on a minor field never triggers review. " +
         `Categories: ${CATEGORIES.join(", ")}. Conditions: ${CONDITIONS.join(", ")}. ` +
@@ -206,5 +208,120 @@ export function registerTools(server: McpServer, svc: ConnectorService) {
         }
         return content;
       }),
+  );
+
+  server.registerTool(
+    "catalog_find",
+    {
+      title: "Find a product in the catalogue",
+      description:
+        "Look up products already in the ToyVault catalogue before any web search. Pass the model/SKU number, " +
+        "barcode digits and/or the name and series text you read on the packaging. Results are ordered by exact " +
+        "model number, then barcode, then text; each shows how many units already use it. If one result is clearly " +
+        "the product in the photo, reuse its CAT- ID in units_create and skip the web search. If none fits, do one " +
+        "web search for the product, then catalog_save. Group the batch's lookups; call it once per distinct product. " +
+        NO_INVENTED_IDS,
+      inputSchema: {
+        model_number: z.string().optional().describe("Model, set or SKU number as printed"),
+        barcode: z.string().optional().describe("UPC/EAN digits"),
+        text: z.string().optional().describe("Brand, series and item name as read"),
+      },
+    },
+    (input) => run(async () => [text(await svc.findCatalog(input))]),
+  );
+
+  server.registerTool(
+    "catalog_save",
+    {
+      title: "Save a new product to the catalogue",
+      description:
+        "Store a product you identified that catalog_find did not know, with the source URL from your web check " +
+        "(a maker page, set database or collector wiki). Items with a source URL are marked verified; without one " +
+        "they are stored unverified and still usable. Returns the CAT- ID to put in units_create. Calling it again " +
+        "with the same fields returns the same ID. Never overwrite a product the operator corrected by hand. " +
+        `Categories: ${CATEGORIES.join(", ")}.`,
+      inputSchema: {
+        category: z.enum(CATEGORIES),
+        brand: z.string().default(""),
+        franchise: z.string().default(""),
+        series: z.string().default(""),
+        wave: z.string().default(""),
+        item_name: z.string().min(1),
+        model_number: z.string().default(""),
+        barcode: z.string().default(""),
+        scale: z.string().default(""),
+        release_year: z.number().int().min(1900).max(2100).nullable().default(null),
+        release_year_source: z.enum(["ocr", "web", "inferred"]).nullable().default(null),
+        source_url: z.url().nullable().default(null).describe("The page you used to confirm the product"),
+        field_confidence: z.record(z.string(), z.number().min(0).max(1)).default({}),
+      },
+    },
+    (input) => run(async () => [text(await svc.saveCatalog(input))]),
+  );
+
+  server.registerTool(
+    "search",
+    {
+      title: "Search the inventory",
+      description:
+        "Answer 'where is …' questions: search units by name, series, brand, franchise, model number, text read " +
+        "from packaging, notes or location. Partial words and short forms work ('turbo rac s3'); typos are " +
+        "corrected. If the operator attached a photo in chat, read it and search with the text you see. Returns a " +
+        "list with locations plus one contact sheet of thumbnails labelled with unit IDs. Nothing is recorded.",
+      inputSchema: {
+        query: z.string().default("").describe("Free text"),
+        category: z.array(z.enum(CATEGORIES)).optional(),
+        brand: z.array(z.string()).optional(),
+        series: z.array(z.string()).optional(),
+        location_id: LocationId.optional().describe("Only units at this location or below it"),
+        in_transit: z.boolean().optional(),
+        unverified: z.boolean().optional().describe("Only flagged or unverified units"),
+        limit: z.number().int().min(1).max(60).default(24),
+      },
+    },
+    (input) =>
+      run(async () => {
+        const { result, sheet } = await svc.search({
+          q: input.query,
+          category: input.category?.join(","),
+          brand: input.brand?.join(","),
+          series: input.series?.join(","),
+          location: input.location_id,
+          in_transit: input.in_transit ? "true" : undefined,
+          unverified: input.unverified ? "true" : undefined,
+          limit: input.limit,
+        });
+        const content: Content = [
+          text({
+            total: result.total,
+            showing: result.hits.length,
+            hits: result.hits.map((h) => ({
+              unit_id: h.unit_id,
+              item: h.item_name,
+              series: h.series,
+              brand: h.brand,
+              condition: h.condition,
+              location: h.location_path,
+              flagged: h.needs_review,
+            })),
+          }),
+        ];
+        if (sheet) content.push(image(sheet));
+        return content;
+      }),
+  );
+
+  server.registerTool(
+    "undo_batch",
+    {
+      title: "Undo a batch",
+      description:
+        "Reverse a whole batch by its B- ID (from a receipt) with compensating movements. Nothing is deleted: " +
+        "units listed by an undone intake are marked disposed (reason 'undo') and their photos can be listed again; " +
+        "moves go back where they came from. Only call this when the operator explicitly asks to undo a batch. " +
+        "If a unit has moved again since, the undo is refused; undo the later batch first. Safe to repeat.",
+      inputSchema: { batch_id: BatchId },
+    },
+    ({ batch_id }) => run(async () => [text(await svc.undoBatch(batch_id))]),
   );
 }
