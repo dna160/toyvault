@@ -1,0 +1,22 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "toyvault-api-dev",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["packages/api/dist/index.js"],
+      "port": 3100,
+      "env": {
+        "PORT": "3100",
+        "DATABASE_URL": "postgres://toyvault:toyvault@localhost:55432/toyvault_dev",
+        "CONNECTOR_TOKEN": "dev-connector-token-0123456789abcdef0123",
+        "VIEWER_PASSWORD": "dev-viewer-password",
+        "SESSION_SECRET": "dev-session-secret-0123456789abcdef0123",
+        "S3_ENDPOINT": "https://bucket.invalid",
+        "S3_BUCKET": "dev",
+        "S3_ACCESS_KEY_ID": "dev",
+        "S3_SECRET_ACCESS_KEY": "dev"
+      }
+    }
+  ]
+}

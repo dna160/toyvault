@@ -283,9 +283,9 @@ export function registerTools(server: McpServer, svc: ConnectorService) {
       run(async () => {
         const { result, sheet } = await svc.search({
           q: input.query,
-          category: input.category?.join(","),
-          brand: input.brand?.join(","),
-          series: input.series?.join(","),
+          category: input.category?.join("|"),
+          brand: input.brand?.join("|"),
+          series: input.series?.join("|"),
           location: input.location_id,
           in_transit: input.in_transit ? "true" : undefined,
           unverified: input.unverified ? "true" : undefined,

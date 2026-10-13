@@ -18,6 +18,9 @@
 | `S3_ACCESS_KEY_ID` | `${{toyvault-photos.ACCESS_KEY_ID}}` |
 | `S3_SECRET_ACCESS_KEY` | `${{toyvault-photos.SECRET_ACCESS_KEY}}` |
 | `S3_FORCE_PATH_STYLE` | `false` (Railway buckets use virtual-hosted URLs) |
+| `VIEWER_PASSWORD` | Shared password for the read-only viewer (≥ 12 chars). Read it from the Railway dashboard. |
+| `SESSION_SECRET` | Random string, ≥ 32 chars; signs viewer session cookies. Changing it signs everyone out. |
+| `NODE_ENV` | `production` (secure cookies) |
 
 `PORT` is provided by Railway. No secret is ever committed; `.env.example` lists the names only.
 

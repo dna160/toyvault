@@ -243,7 +243,7 @@ export type UnitDetail = z.infer<typeof UnitDetail>;
 const csv = z
   .string()
   .optional()
-  .transform((v) => (v ? v.split(",").map((s) => s.trim()).filter(Boolean) : []));
+  .transform((v) => (v ? v.split("|").map((s) => s.trim()).filter(Boolean) : []));
 
 export const SearchQuery = z.object({
   q: z.string().max(200).default(""),

@@ -6,6 +6,7 @@ Claude Desktop. Spec: [`docs/MASTER_PROMPT.md`](docs/MASTER_PROMPT.md).
 - `packages/connector`: local MCP server Claude Desktop launches; reads `~/ToyVault/inbox/<date>/`
 - `packages/api`: Railway service holding the ledger (Postgres) and photos (private bucket)
 - `packages/shared`: the classification contract, ID formats and thresholds
+- `packages/viewer`: read-only web viewer (search, unit detail, locations, batches), served by the API
 
 ## Set up the connector on the Claude Desktop computer
 
@@ -18,7 +19,8 @@ pnpm install
 pnpm install-connector -- --api-url https://<toyvault-api domain>
 ```
 
-It asks for the connector token (from the `CONNECTOR_TOKEN` variable on Railway), writes it to
+Quit Claude Desktop fully (Cmd+Q) before running it: Claude Desktop rewrites its config file while
+it is open and would drop the new entry. It asks for the connector token (from the `CONNECTOR_TOKEN` variable on Railway), writes it to
 `~/ToyVault/config.json`, backs up `claude_desktop_config.json` and adds `mcpServers.toyvault`.
 Quit and reopen Claude Desktop, then paste [`prompts/desktop-instructions.md`](prompts/desktop-instructions.md)
 into the Claude Desktop project's instructions.

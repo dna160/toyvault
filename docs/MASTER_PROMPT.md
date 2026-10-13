@@ -294,6 +294,7 @@ COMMANDS (first line of the operator's message)
 - "Count <path> <date>" — compare photos of a shelf with what the ledger expects.
 - "Where is …" (text or an attached photo) — search; nothing is recorded.
 - "Review" — work through the open review items.
+- "Undo batch <B-id>" — reverse that batch (undo_batch). Only when the operator asks.
 
 INTAKE PROCEDURE
 1. location_resolve the location. inbox_next_batch(folder=<date>).

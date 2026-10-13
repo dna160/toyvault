@@ -2,7 +2,7 @@
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
-watchPatterns = ["packages/api/**", "packages/shared/**", "Dockerfile", "pnpm-lock.yaml", "railway.toml"]
+watchPatterns = ["packages/api/**", "packages/shared/**", "packages/viewer/**", "Dockerfile", "pnpm-lock.yaml", "railway.toml"]
 
 [deploy]
 healthcheckPath = "/healthz"
