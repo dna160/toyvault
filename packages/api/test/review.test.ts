@@ -13,7 +13,7 @@ beforeAll(async () => {
   const res = (
     await intake(ctx, office, [
       extraction([p[0]!], { item_name: "Shipping carton", category: "Other", identity_confidence: 0.3, needs_review: true, review_reason: "contents not visible", ocr_text: [] }),
-      extraction([p[1]!], { item_name: "Noctis", category: "Action figure", field_confidence: { release_year: 0.5, series: 0.95 }, release_year: 2016, ocr_text: [] }),
+      extraction([p[1]!], { item_name: "Noctis", category: "Action figure", field_confidence: { release_year: 0.5, series: 0.95, model_number: 0 }, release_year: 2016, ocr_text: [] }),
       extraction([p[2]!], { item_name: "Lightning", category: "Action figure", field_confidence: { series: 0.95 }, ocr_text: [] }),
       extraction([p[3]!], { item_name: "Ferrari SP3", category: "Building set", web_source_url: "https://example.com/42143", ocr_text: [] }),
     ])

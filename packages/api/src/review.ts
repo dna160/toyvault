@@ -22,7 +22,8 @@ const FLAGGED = sql`u.status = 'active' AND u.needs_review`;
 const UNVERIFIED = sql`NOT c.verified AND NOT c.operator_corrected
   AND EXISTS (SELECT 1 FROM units x WHERE x.catalog_item_id = c.id AND x.status = 'active')`;
 const LOW_CONFIDENCE = sql`u.status = 'active' AND NOT u.needs_review AND u.reviewed_at IS NULL AND NOT c.operator_corrected
-  AND EXISTS (SELECT 1 FROM jsonb_each_text(c.field_confidence) f WHERE f.value::numeric < ${LOW_FIELD_CONFIDENCE})`;
+  AND EXISTS (SELECT 1 FROM jsonb_each_text(c.field_confidence) f
+               WHERE f.value::numeric > 0 AND f.value::numeric < ${LOW_FIELD_CONFIDENCE})`;
 
 export async function reviewSummary(db: DB): Promise<ReviewSummary> {
   const r = await sql<{ flagged: number; unverified: number; low_confidence: number; count_discrepancies: number; ambiguous_moves: number }>`
@@ -144,7 +145,8 @@ function lowFields(r: Row) {
     condition: r.condition ?? "",
   };
   return Object.entries(r.field_confidence ?? {})
-    .filter(([, c]) => Number(c) < LOW_FIELD_CONFIDENCE)
+    // 0 means "not read" (the field is simply absent), not "uncertain".
+    .filter(([, c]) => Number(c) > 0 && Number(c) < LOW_FIELD_CONFIDENCE)
     .map(([field, c]) => ({ field, value: values[field] ?? "", confidence: Number(c) }))
     .sort((a, b) => a.confidence - b.confidence);
 }
