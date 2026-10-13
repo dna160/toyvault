@@ -11,6 +11,8 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 
 const { values } = parseArgs({
+  // pnpm forwards the "--" separator; drop it so `pnpm install-connector -- --api-url …` works.
+  args: process.argv.slice(2).filter((a) => a !== "--"),
   options: {
     "api-url": { type: "string" },
     root: { type: "string" },
