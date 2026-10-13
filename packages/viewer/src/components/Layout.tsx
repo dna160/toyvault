@@ -6,12 +6,15 @@ import { fmtNum } from "../lib/format";
 const NAV = [
   { href: "/", label: "Search", match: (p: string) => p === "/" || p.startsWith("/units") },
   { href: "/locations", label: "Locations", match: (p: string) => p.startsWith("/locations") },
+  { href: "/review", label: "Review", match: (p: string) => p.startsWith("/review") },
   { href: "/batches", label: "Batches", match: (p: string) => p.startsWith("/batches") },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [path] = useLocation();
   const stats = useQuery({ queryKey: ["stats"], queryFn: api.stats, staleTime: 30_000 });
+  const review = useQuery({ queryKey: ["review-summary"], queryFn: api.reviewSummary, staleTime: 30_000 });
+  const flagged = (review.data?.flagged ?? 0) + (review.data?.ambiguous_moves ?? 0) + (review.data?.count_discrepancies ?? 0);
 
   return (
     <div className="min-h-dvh">
@@ -30,9 +33,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 }`}
               >
                 {n.label}
-                {n.label === "Search" && stats.data && stats.data.open_reviews > 0 && (
-                  <span className="ml-1.5 rounded-full bg-accent px-1.5 py-px text-[11px] font-semibold text-white" title="Flagged for review">
-                    {stats.data.open_reviews}
+                {n.label === "Review" && flagged > 0 && (
+                  <span className="ml-1.5 rounded-full bg-accent px-1.5 py-px text-[11px] font-semibold text-white" title="Need a decision">
+                    {flagged}
                   </span>
                 )}
               </Link>

@@ -2,6 +2,12 @@ import type {
   CandidatesResponse,
   CatalogItem,
   CatalogSaveRequest,
+  CatalogUpdateRequest,
+  ReviewKind,
+  ReviewList,
+  ReviewSummary,
+  UnitReviewRequest,
+  UnitReviewResult,
   SearchQueryInput,
   SearchResponse,
   UndoResult,
@@ -61,6 +67,22 @@ export class ApiClient {
   }
   search(params: SearchQueryInput) {
     return this.request<SearchResponse>("GET", `/v1/search?${query(params)}`);
+  }
+  reviewSummary() {
+    return this.request<ReviewSummary>("GET", "/v1/reviews/summary");
+  }
+  reviews(kind: ReviewKind, limit = 20, offset = 0) {
+    return this.request<ReviewList>("GET", `/v1/reviews?${query({ kind, limit, offset })}`);
+  }
+  reviewUnit(unitId: string, body: UnitReviewRequest) {
+    return this.request<UnitReviewResult>("POST", `/v1/units/${encodeURIComponent(unitId)}/review`, body);
+  }
+  updateCatalog(id: string, body: CatalogUpdateRequest) {
+    return this.request<{ id: string; verified: boolean; operator_corrected: boolean; changed: string[] }>(
+      "POST",
+      `/v1/catalog/${encodeURIComponent(id)}`,
+      body,
+    );
   }
   undoBatch(batchId: string) {
     return this.request<UndoResult>("POST", `/v1/batches/${encodeURIComponent(batchId)}/undo`, {});

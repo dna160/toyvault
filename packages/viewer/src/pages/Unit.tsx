@@ -41,7 +41,10 @@ export function Unit({ id }: { id: string }) {
             <div className="mt-4 rounded-xl border border-accent/40 bg-accent-soft p-4">
               <p className="text-sm font-semibold text-accent-ink">Flagged for review</p>
               <p className="mt-1 text-sm text-ink-2">{u.review_reason}</p>
-              <p className="mt-2 text-xs text-muted">Resolve it in Claude Desktop (review tools arrive in the next phase).</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-muted">In Claude Desktop:</span>
+                <Phrase text={`Review ${u.id}`} />
+              </div>
             </div>
           )}
 

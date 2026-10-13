@@ -13,6 +13,7 @@ import { Unauthorized, api } from "./lib/api";
 import { Batches } from "./pages/Batches";
 import { Locations } from "./pages/Locations";
 import { Login } from "./pages/Login";
+import { Review } from "./pages/Review";
 import { Search } from "./pages/Search";
 import { Unit } from "./pages/Unit";
 
@@ -40,6 +41,7 @@ function App() {
         <Route path="/units/:id">{(p) => <Unit id={p.id} />}</Route>
         <Route path="/locations" component={Locations} />
         <Route path="/batches" component={Batches} />
+        <Route path="/review/:kind?">{(p) => <Review kind={p.kind} />}</Route>
         <Route>
           <Empty title="Page not found" />
         </Route>

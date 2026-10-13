@@ -3,6 +3,9 @@ import { readFile } from "node:fs/promises";
 import {
   type Candidate,
   type CatalogSaveRequest,
+  type CatalogUpdateRequest,
+  type ReviewKind,
+  type UnitReviewRequest,
   type Extraction,
   IMAGE_DEFAULTS,
   ID_PATTERNS,
@@ -119,6 +122,25 @@ export class ConnectorService {
 
   undoBatch(batchId: string) {
     return this.api.undoBatch(batchId);
+  }
+
+  async reviewList(kind: ReviewKind, limit: number, offset: number) {
+    const [summary, list] = await Promise.all([this.api.reviewSummary(), this.api.reviews(kind, limit, offset)]);
+    if (list.items.length === 0) return { summary, list, sheet: null };
+    const images = await mapLimit(list.items, CONCURRENCY, (i) => (i.thumb_url ? this.api.download(i.thumb_url) : Promise.resolve(null)));
+    const sheet = await contactSheet(
+      list.items.slice(0, IMAGE_DEFAULTS.contactSheetMaxTiles).map((i, n) => ({ label: i.subject_id, image: images[n] ?? null })),
+      { title: `${kind.replace("_", " ")} · ${list.total} open` },
+    );
+    return { summary, list, sheet };
+  }
+
+  reviewUnit(unitId: string, body: UnitReviewRequest) {
+    return this.api.reviewUnit(unitId, body);
+  }
+
+  updateCatalog(id: string, body: CatalogUpdateRequest) {
+    return this.api.updateCatalog(id, body);
   }
 
   async nextBatch(folder: string, size = this.cfg.batchSize, maxPx = this.cfg.previewPx): Promise<NextBatchResult> {

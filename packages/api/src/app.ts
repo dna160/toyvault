@@ -5,11 +5,14 @@ import {
   CandidatesQuery,
   CatalogFindQuery,
   CatalogSaveRequest,
+  CatalogUpdateRequest,
   IntakeBatchRequest,
   LocationResolveRequest,
   PhotoRegisterRequest,
   PresignRequest,
+  ReviewQuery,
   SearchQuery,
+  UnitReviewRequest,
   formatIssues,
 } from "@toyvault/shared";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -32,6 +35,7 @@ import { HttpError } from "./errors.js";
 import { commitIntakeBatch } from "./intake.js";
 import { resolveLocationPath } from "./locations.js";
 import { getBatchReceipt, listBatches, locationTree, stats } from "./reads.js";
+import { listReviews, reviewSummary, reviewUnit, updateCatalog } from "./review.js";
 import { searchUnits } from "./search.js";
 import { type Storage, photoKeys } from "./storage.js";
 import { undoBatch } from "./undo.js";
@@ -173,6 +177,12 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       v1.post("/intake-batches", async (req) => commitIntakeBatch(db, storage, IntakeBatchRequest.parse(req.body)));
       v1.post("/catalog", async (req) => saveCatalog(db, CatalogSaveRequest.parse(req.body)));
       v1.post<{ Params: { id: string } }>("/batches/:id/undo", async (req) => undoBatch(db, req.params.id));
+      v1.post<{ Params: { id: string } }>("/units/:id/review", async (req) =>
+        reviewUnit(db, req.params.id, UnitReviewRequest.parse(req.body)),
+      );
+      v1.post<{ Params: { id: string } }>("/catalog/:id", async (req) =>
+        updateCatalog(db, req.params.id, CatalogUpdateRequest.parse(req.body)),
+      );
 
       // Reads (connector or viewer)
       v1.get("/search", async (req) => searchUnits(db, storage, SearchQuery.parse(req.query)));
@@ -188,6 +198,8 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       });
       v1.get<{ Params: { id: string } }>("/batches/:id", async (req) => getBatchReceipt(db, req.params.id));
       v1.get("/stats", async () => stats(db));
+      v1.get("/reviews/summary", async () => reviewSummary(db));
+      v1.get("/reviews", async (req) => listReviews(db, storage, ReviewQuery.parse(req.query)));
     },
     { prefix: "/v1" },
   );

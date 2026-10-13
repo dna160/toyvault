@@ -1,6 +1,18 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { BatchId, CATEGORIES, CONDITIONS, Extraction, LocationId, PhotoId, THRESHOLDS } from "@toyvault/shared";
+import {
+  BatchId,
+  CATEGORIES,
+  CONDITIONS,
+  CatalogId,
+  Extraction,
+  LOW_FIELD_CONFIDENCE,
+  LocationId,
+  PhotoId,
+  ReviewKind,
+  THRESHOLDS,
+  UnitId,
+} from "@toyvault/shared";
 import { z } from "zod";
 import { ApiRequestError, RailwayUnreachableError } from "./api-client.js";
 import { type ConnectorService, ToolInputError } from "./service.js";
@@ -323,5 +335,106 @@ export function registerTools(server: McpServer, svc: ConnectorService) {
       inputSchema: { batch_id: BatchId },
     },
     ({ batch_id }) => run(async () => [text(await svc.undoBatch(batch_id))]),
+  );
+
+  server.registerTool(
+    "review_list",
+    {
+      title: "List review items",
+      description:
+        "Work the exception queues when the operator says 'Review' (or 'Review flagged', 'Verify products', " +
+        "'Check low-confidence'). Queues: 'flagged' = units whose identity was uncertain at intake; 'unverified' = " +
+        "products (CAT-) never confirmed by a web source, one row per product covering all its copies; " +
+        `'low_confidence' = units with a minor field below ${LOW_FIELD_CONFIDENCE}. Returns counts for every queue, the ` +
+        "items with reasons, and one contact sheet labelled with each item's ID. Present them to the operator grouped " +
+        "and numbered, with your proposed decision for each, and ask once. For unverified products, do the web check " +
+        "yourself first and propose the source. Nothing is recorded by this tool.",
+      inputSchema: {
+        kind: ReviewKind.default("flagged"),
+        limit: z.number().int().min(1).max(24).default(12),
+        offset: z.number().int().min(0).default(0),
+      },
+    },
+    ({ kind, limit, offset }) =>
+      run(async () => {
+        const { summary, list, sheet } = await svc.reviewList(kind, limit, offset);
+        const content: Content = [
+          text({
+            queues: summary,
+            kind,
+            total: list.total,
+            items: list.items.map((i) => ({
+              id: i.subject_id,
+              review_id: i.review_id,
+              item: i.item_name,
+              series: i.series,
+              brand: i.brand,
+              category: i.category,
+              model: i.model_number,
+              units: i.kind === "unverified" ? `${i.unit_count} (${i.unit_ids.join(", ")})` : undefined,
+              location: i.location_paths.join("; "),
+              reason: i.reason,
+              identity_confidence: i.identity_confidence,
+              low_fields: i.low_fields.length ? i.low_fields : undefined,
+            })),
+          }),
+        ];
+        if (sheet) content.push(image(sheet));
+        return content;
+      }),
+  );
+
+  server.registerTool(
+    "review_resolve",
+    {
+      title: "Resolve a unit review",
+      description:
+        "Record the operator's decision for one unit (TV-): 'confirm' (it is right as listed), 'correct' (relink it " +
+        "to another catalogue item with catalog_item_id and/or fix condition or notes), or 'not_a_toy' (dispose it " +
+        "with a reason, e.g. an empty shipping carton; it moves to Disposed and nothing is deleted). Clears its flag " +
+        "and resolves its open reviews. To fix or verify the product itself (name, series, source), use " +
+        "catalog_update instead. Only record decisions the operator agreed to. " +
+        NO_INVENTED_IDS,
+      inputSchema: {
+        unit_id: UnitId,
+        action: z.enum(["confirm", "correct", "not_a_toy"]),
+        catalog_item_id: CatalogId.optional(),
+        condition: z.enum(CONDITIONS).optional(),
+        notes: z.string().optional(),
+        reason: z.string().optional().describe("Required for not_a_toy; optional note for the audit log otherwise"),
+      },
+    },
+    ({ unit_id, ...body }) => run(async () => [text(await svc.reviewUnit(unit_id, body))]),
+  );
+
+  server.registerTool(
+    "catalog_update",
+    {
+      title: "Correct or verify a product",
+      description:
+        "Fix a catalogue product (CAT-) and every copy that uses it: name, series, wave, brand, model number, " +
+        "release year and so on. Pass source_url after a successful web check to mark it verified. Set by_operator " +
+        "to true only when the operator stated the correction themselves; such products are then protected from " +
+        "later automatic changes. Only send the fields that change. Every change is logged.",
+      inputSchema: {
+        catalog_item_id: CatalogId,
+        category: z.enum(CATEGORIES).optional(),
+        brand: z.string().optional(),
+        franchise: z.string().optional(),
+        series: z.string().optional(),
+        wave: z.string().optional(),
+        item_name: z.string().min(1).optional(),
+        model_number: z.string().optional(),
+        barcode: z.string().optional(),
+        scale: z.string().optional(),
+        release_year: z.number().int().min(1900).max(2100).nullable().optional(),
+        release_year_source: z.enum(["ocr", "web", "inferred"]).nullable().optional(),
+        source_url: z.url().nullable().optional(),
+        field_confidence: z.record(z.string(), z.number().min(0).max(1)).optional(),
+        by_operator: z.boolean().default(false),
+        reason: z.string().optional(),
+      },
+    },
+    ({ catalog_item_id, ...body }) => run(async () => [text(await svc.updateCatalog(catalog_item_id, body))]),
   );
 }

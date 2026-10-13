@@ -399,3 +399,95 @@ export type ApiError = z.infer<typeof ApiError>;
 export function formatIssues(error: z.ZodError): { path: string; message: string }[] {
   return error.issues.map((i) => ({ path: i.path.join(".") || "(root)", message: i.message }));
 }
+
+// ---------- Review ----------
+
+/** Minor fields below this confidence are listed under "Low-confidence fields". */
+export const LOW_FIELD_CONFIDENCE = 0.7;
+
+export const ReviewKind = z.enum(["flagged", "unverified", "low_confidence"]);
+export type ReviewKind = z.infer<typeof ReviewKind>;
+
+export const ReviewQuery = z.object({
+  kind: ReviewKind,
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+export const ReviewItem = z.object({
+  kind: ReviewKind,
+  /** The thing to act on: a unit (TV-) or, for unverified products, a catalogue item (CAT-). */
+  subject_id: z.string(),
+  review_id: z.string().nullable(),
+  unit_ids: z.array(UnitId),
+  unit_count: z.number().int(),
+  catalog_item_id: CatalogId,
+  category: z.string(),
+  brand: z.string(),
+  series: z.string(),
+  item_name: z.string(),
+  model_number: z.string(),
+  location_paths: z.array(z.string()),
+  thumb_url: z.string().nullable(),
+  reason: z.string().nullable(),
+  identity_confidence: z.number().nullable(),
+  low_fields: z.array(z.object({ field: z.string(), value: z.string(), confidence: z.number() })),
+  created_at: z.string(),
+});
+export type ReviewItem = z.infer<typeof ReviewItem>;
+
+export const ReviewList = z.object({ kind: ReviewKind, total: z.number().int(), items: z.array(ReviewItem) });
+export type ReviewList = z.infer<typeof ReviewList>;
+
+export const ReviewSummary = z.object({
+  flagged: z.number().int(),
+  unverified: z.number().int(),
+  low_confidence: z.number().int(),
+  ambiguous_moves: z.number().int(),
+  count_discrepancies: z.number().int(),
+});
+export type ReviewSummary = z.infer<typeof ReviewSummary>;
+
+export const UnitReviewRequest = z
+  .object({
+    action: z.enum(["confirm", "correct", "not_a_toy"]),
+    catalog_item_id: CatalogId.optional(),
+    condition: z.enum(CONDITIONS).optional(),
+    notes: z.string().max(2000).optional(),
+    reason: z.string().max(500).optional(),
+  })
+  .refine((r) => r.action !== "not_a_toy" || !!r.reason, { message: "reason is required for not_a_toy", path: ["reason"] })
+  .refine((r) => r.action !== "correct" || !!(r.catalog_item_id || r.condition || r.notes !== undefined), {
+    message: "correct needs at least one of catalog_item_id, condition or notes",
+    path: ["action"],
+  });
+export type UnitReviewRequest = z.input<typeof UnitReviewRequest>;
+
+export const UnitReviewResult = z.object({
+  unit_id: UnitId,
+  action: z.string(),
+  status: z.string(),
+  catalog_item_id: CatalogId,
+  resolved_reviews: z.array(z.string()),
+});
+export type UnitReviewResult = z.infer<typeof UnitReviewResult>;
+
+export const CatalogUpdateRequest = z.object({
+  category: z.enum(CATEGORIES).optional(),
+  brand: z.string().optional(),
+  franchise: z.string().optional(),
+  series: z.string().optional(),
+  wave: z.string().optional(),
+  item_name: z.string().min(1).optional(),
+  model_number: z.string().optional(),
+  barcode: z.string().optional(),
+  scale: z.string().optional(),
+  release_year: z.number().int().min(1900).max(2100).nullable().optional(),
+  release_year_source: z.enum(["ocr", "web", "inferred"]).nullable().optional(),
+  source_url: z.url().nullable().optional(),
+  field_confidence: z.record(z.string(), confidence).optional(),
+  /** true when the operator stated the correction; protects it from later web data. */
+  by_operator: z.boolean().default(false),
+  reason: z.string().max(500).optional(),
+});
+export type CatalogUpdateRequest = z.input<typeof CatalogUpdateRequest>;

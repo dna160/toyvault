@@ -37,6 +37,7 @@ export interface CatalogItemsTable {
   verified: Generated<boolean>;
   field_confidence: Json<Record<string, number>>;
   client_key: string | null;
+  operator_corrected: Generated<boolean>;
   created_at: Timestamp;
 }
 
@@ -69,6 +70,7 @@ export interface UnitsTable {
   status: Generated<"active" | "merged" | "disposed">;
   status_reason: string | null;
   created_batch_id: string | null;
+  reviewed_at: Timestamp | null;
   created_at: Timestamp;
 }
 
@@ -160,6 +162,16 @@ export interface UnitSearchTable {
   updated_at: Timestamp;
 }
 
+export interface EditsTable {
+  id: Generated<string>;
+  subject_type: "unit" | "catalog_item";
+  subject_id: string;
+  before: Json<unknown>;
+  after: Json<unknown>;
+  reason: string | null;
+  created_at: Timestamp;
+}
+
 export interface Database {
   locations: LocationsTable;
   containers: ContainersTable;
@@ -174,6 +186,7 @@ export interface Database {
   unit_current_location: UnitCurrentLocationView;
   review_tasks: ReviewTasksTable;
   unit_search: UnitSearchTable;
+  edits: EditsTable;
 }
 
 export type DB = Kysely<Database>;

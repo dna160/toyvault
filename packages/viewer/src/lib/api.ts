@@ -1,6 +1,9 @@
 import type {
   BatchSummary,
   LocationNode,
+  ReviewKind,
+  ReviewList,
+  ReviewSummary,
   SearchResponse,
   Stats,
   UnitDetail,
@@ -50,6 +53,8 @@ export const api = {
   unit: (id: string) => get<UnitDetail>(`/v1/units/${encodeURIComponent(id)}`),
   locations: () => get<{ roots: LocationNode[] }>("/v1/locations/tree"),
   batches: () => get<{ batches: BatchSummary[] }>("/v1/batches?limit=100"),
+  reviewSummary: () => get<ReviewSummary>("/v1/reviews/summary"),
+  reviews: (kind: ReviewKind, offset: number) => get<ReviewList>(`/v1/reviews?kind=${kind}&limit=30&offset=${offset}`),
   async login(password: string) {
     const res = await fetch("/auth/login", {
       method: "POST",
