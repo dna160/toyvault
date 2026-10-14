@@ -64,6 +64,7 @@ describe("search performance at 10,000 units", () => {
       `/v1/search?q=${encodeURIComponent(q)}`,
       `/v1/search?q=${encodeURIComponent(q)}&category=Model%20kit&limit=120`,
       `/v1/search?q=${encodeURIComponent(q)}&unverified=true&offset=60`,
+      `/v1/search?q=${encodeURIComponent(q)}&group=series`,
     ]);
     for (const url of urls.slice(0, 5)) await ctx.app.inject({ method: "GET", url, headers: auth }); // warm up
 

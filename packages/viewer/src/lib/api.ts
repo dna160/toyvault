@@ -31,6 +31,7 @@ export interface SearchParams {
   unverified: boolean;
   in_transit: boolean;
   sort: "relevance" | "newest" | "name";
+  group: boolean;
 }
 
 export function searchUrl(p: SearchParams, offset: number, limit = 60) {
@@ -41,6 +42,7 @@ export function searchUrl(p: SearchParams, offset: number, limit = 60) {
   if (p.unverified) qs.set("unverified", "true");
   if (p.in_transit) qs.set("in_transit", "true");
   if (p.sort !== "relevance") qs.set("sort", p.sort);
+  if (p.group) qs.set("group", "series");
   qs.set("limit", String(limit));
   qs.set("offset", String(offset));
   return `/v1/search?${qs}`;

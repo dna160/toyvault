@@ -262,6 +262,8 @@ export const SearchQuery = z.object({
     .transform((v) => v === "true"),
   status: z.enum(["active", "all"]).default("active"),
   sort: z.enum(["relevance", "newest", "name"]).default("relevance"),
+  /** "series": one result per series (units without a series stay single). */
+  group: z.enum(["none", "series"]).default("none"),
   limit: z.coerce.number().int().min(1).max(200).default(60),
   offset: z.coerce.number().int().min(0).max(100_000).default(0),
 });
@@ -284,12 +286,26 @@ export const SearchHit = z.object({
   location_path: z.string(),
   thumb_url: z.string().nullable(),
   created_at: z.string(),
+  /** Present when results are grouped and this hit stands for several units of one series. */
+  group: z
+    .object({
+      series: z.string(),
+      count: z.number().int(),
+      flagged: z.number().int(),
+      thumb_urls: z.array(z.string().nullable()),
+      location_paths: z.array(z.string()),
+    })
+    .nullable()
+    .optional(),
 });
 export type SearchHit = z.infer<typeof SearchHit>;
 
 const facet = z.array(z.object({ value: z.string(), count: z.number().int() }));
 export const SearchResponse = z.object({
+  /** Results (groups count once when grouped). */
   total: z.number().int(),
+  /** Units behind those results. */
+  unit_total: z.number().int(),
   took_ms: z.number(),
   hits: z.array(SearchHit),
   facets: z.object({ category: facet, brand: facet, series: facet, condition: facet }),

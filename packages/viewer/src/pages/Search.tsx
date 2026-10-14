@@ -24,7 +24,10 @@ function readParams(search: string): SearchParams & { view: "grid" | "table"; lo
     loc_path: s.get("loc_path") ?? "",
     unverified: s.get("unverified") === "1",
     in_transit: s.get("in_transit") === "1",
-    sort: (s.get("sort") as SearchParams["sort"]) ?? "relevance",
+    // Inside one series with no search text, list in name order (No.001, No.002, …).
+    sort: (s.get("sort") as SearchParams["sort"]) ?? (list("series").length === 1 && !s.get("q") ? "name" : "relevance"),
+    // Series collapse into one card by default; a selected series shows its units.
+    group: s.get("group") !== "off" && list("series").length === 0,
     view: s.get("view") === "table" ? "table" : "grid",
   };
 }
@@ -39,7 +42,9 @@ function writeParams(p: ReturnType<typeof readParams>): string {
   }
   if (p.unverified) s.set("unverified", "1");
   if (p.in_transit) s.set("in_transit", "1");
-  if (p.sort !== "relevance") s.set("sort", p.sort);
+  const defaultSort = p.series.length === 1 && !p.q ? "name" : "relevance";
+  if (p.sort !== defaultSort) s.set("sort", p.sort);
+  if (!p.group && p.series.length === 0) s.set("group", "off");
   if (p.view === "table") s.set("view", "table");
   const str = s.toString();
   return str ? `/?${str}` : "/";
@@ -72,6 +77,7 @@ export function Search() {
   });
 
   const first = query.data?.pages[0];
+  const groupHref = (series: string) => writeParams({ ...params, series: [series] });
   const hits = useMemo(() => query.data?.pages.flatMap((p) => p.hits) ?? [], [query.data]);
   const facets = first?.facets;
 
@@ -92,7 +98,11 @@ export function Search() {
           className="w-full rounded-xl border-2 border-ink bg-card py-3.5 pr-36 pl-12 text-[17px] outline-none placeholder:text-muted/70"
         />
         <span className="pointer-events-none absolute top-1/2 right-4 hidden -translate-y-1/2 font-mono text-[12px] text-muted sm:block">
-          {first ? `${fmtNum(first.total)} result${first.total === 1 ? "" : "s"} · ${first.took_ms} ms` : ""}
+          {first
+            ? `${fmtNum(first.total)} result${first.total === 1 ? "" : "s"}${
+                first.unit_total !== first.total ? ` · ${fmtNum(first.unit_total)} units` : ""
+              } · ${first.took_ms} ms`
+            : ""}
         </span>
       </div>
       <p className="mt-2 text-xs text-muted">
@@ -116,6 +126,16 @@ export function Search() {
         <button type="button" className={`chip ${params.in_transit ? "chip-on" : ""}`} onClick={() => set({ in_transit: !params.in_transit })}>
           In transit only
         </button>
+        {params.series.length === 0 && (
+          <button
+            type="button"
+            className={`chip ${params.group ? "chip-on" : ""}`}
+            onClick={() => set({ group: !params.group })}
+            title="Show each series as one card"
+          >
+            Group series
+          </button>
+        )}
         <div className="ml-auto flex items-center gap-2">
           <select
             aria-label="Sort"
@@ -152,9 +172,9 @@ export function Search() {
             Try fewer words or clear a filter. Partial words work: “turbo rac s3”.
           </Empty>
         ) : params.view === "grid" ? (
-          <Grid hits={hits} total={first!.total} loadMore={() => query.hasNextPage && !query.isFetchingNextPage && query.fetchNextPage()} />
+          <Grid hits={hits} total={first!.total} groupHref={groupHref} loadMore={() => query.hasNextPage && !query.isFetchingNextPage && query.fetchNextPage()} />
         ) : (
-          <Table hits={hits} total={first!.total} loadMore={() => query.hasNextPage && !query.isFetchingNextPage && query.fetchNextPage()} />
+          <Table hits={hits} total={first!.total} groupHref={groupHref} loadMore={() => query.hasNextPage && !query.isFetchingNextPage && query.fetchNextPage()} />
         )}
       </div>
     </div>
@@ -265,7 +285,7 @@ function useInfiniteRows(count: number, total: number, loaded: number, loadMore:
   return { listRef, virtualizer, items };
 }
 
-function Grid({ hits, total, loadMore }: { hits: SearchHit[]; total: number; loadMore: () => void }) {
+function Grid({ hits, total, loadMore, groupHref }: { hits: SearchHit[]; total: number; loadMore: () => void; groupHref: (s: string) => string }) {
   const wrap = useRef<HTMLDivElement>(null);
   const cols = useColumns(wrap);
   const rows = Math.ceil(hits.length / cols);
@@ -282,9 +302,9 @@ function Grid({ hits, total, loadMore }: { hits: SearchHit[]; total: number; loa
             className="absolute inset-x-0 grid gap-4"
             style={{ transform: `translateY(${row.start - virtualizer.options.scrollMargin}px)`, gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
           >
-            {hits.slice(row.index * cols, row.index * cols + cols).map((h) => (
-              <Card key={h.unit_id} hit={h} />
-            ))}
+            {hits.slice(row.index * cols, row.index * cols + cols).map((h) =>
+              h.group ? <GroupCard key={`g:${h.group.series}`} hit={h} href={groupHref(h.group.series)} /> : <Card key={h.unit_id} hit={h} />,
+            )}
           </div>
         ))}
       </div>
@@ -313,9 +333,38 @@ function Card({ hit }: { hit: SearchHit }) {
   );
 }
 
+/** A whole series as one card: a 2×2 photo mosaic, the series and how many units it holds. */
+function GroupCard({ hit, href }: { hit: SearchHit; href: string }) {
+  const g = hit.group!;
+  const tiles = [...g.thumb_urls, null, null, null, null].slice(0, 4);
+  return (
+    <Link href={href} className="group panel block overflow-hidden transition-shadow hover:shadow-md">
+      <div className="relative grid aspect-[4/3] grid-cols-2 grid-rows-2 gap-px bg-line">
+        {tiles.map((t, i) => (
+          <Thumb key={i} src={t} alt="" className="h-full w-full" rounded="rounded-none" />
+        ))}
+        <div className="absolute top-2 left-2 flex gap-1">
+          <Badge tone="dark">{fmtNum(g.count)} units</Badge>
+          {g.flagged > 0 && <Badge tone="warn">{g.flagged} to check</Badge>}
+        </div>
+      </div>
+      <div className="p-3">
+        <p className="line-clamp-2 leading-snug font-semibold group-hover:underline">{g.series}</p>
+        <p className="mt-0.5 truncate text-sm text-ink-2">{[hit.brand, hit.category].filter(Boolean).join(" · ")}</p>
+        {g.location_paths.length === 1 ? (
+          <Breadcrumb path={g.location_paths[0]!} className="mt-1 text-[13px] text-muted" />
+        ) : (
+          <p className="mt-1 text-[13px] text-muted">{g.location_paths.length} locations</p>
+        )}
+        <p className="mt-1.5 text-[12px] text-accent-ink">Open series →</p>
+      </div>
+    </Link>
+  );
+}
+
 // ---------- Table (virtualised rows) ----------
 
-function Table({ hits, total, loadMore }: { hits: SearchHit[]; total: number; loadMore: () => void }) {
+function Table({ hits, total, loadMore, groupHref }: { hits: SearchHit[]; total: number; loadMore: () => void; groupHref: (s: string) => string }) {
   const { listRef, virtualizer, items } = useInfiniteRows(hits.length, total, hits.length, loadMore, 64, 0);
   return (
     <div className="panel overflow-x-auto">
@@ -332,6 +381,29 @@ function Table({ hits, total, loadMore }: { hits: SearchHit[]; total: number; lo
         <div ref={listRef} style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {items.map((row) => {
             const h = hits[row.index]!;
+            if (h.group) {
+              return (
+                <Link
+                  key={row.key}
+                  href={groupHref(h.group.series)}
+                  className="absolute inset-x-0 grid grid-cols-[56px_2fr_1.4fr_1fr_1fr_1.6fr_96px] items-center gap-3 border-b border-line/70 bg-paper/50 px-3 text-sm hover:bg-paper"
+                  style={{ height: row.size, transform: `translateY(${row.start - virtualizer.options.scrollMargin}px)` }}
+                >
+                  <Thumb src={h.group.thumb_urls[0] ?? null} alt="" className="h-11 w-11" rounded="rounded-md" />
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="truncate font-medium">{h.group.series}</span>
+                    <Badge tone="dark">{fmtNum(h.group.count)}</Badge>
+                  </span>
+                  <span className="truncate text-ink-2">Whole series</span>
+                  <span className="truncate text-ink-2">{h.brand}</span>
+                  <span className="truncate text-ink-2">—</span>
+                  <span className="truncate text-[13px] text-muted">
+                    {h.group.location_paths.length === 1 ? <Breadcrumb path={h.group.location_paths[0]!} /> : `${h.group.location_paths.length} locations`}
+                  </span>
+                  <span className="id">open →</span>
+                </Link>
+              );
+            }
             return (
               <Link
                 key={row.key}

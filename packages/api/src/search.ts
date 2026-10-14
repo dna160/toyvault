@@ -52,11 +52,22 @@ export async function searchUnits(db: DB, storage: Storage, q: Query): Promise<S
       location_path: r.location_path ?? "",
       thumb_url: r.thumb_key ? await storage.presignGet(r.thumb_key) : null,
       created_at: new Date(r.created_at).toISOString(),
+      group:
+        r.group_count && r.group_count > 1
+          ? {
+              series: r.series,
+              count: r.group_count,
+              flagged: r.group_flagged ?? 0,
+              thumb_urls: await Promise.all((r.group_thumbs ?? []).map((k) => (k ? storage.presignGet(k) : null))),
+              location_paths: r.group_paths ?? [],
+            }
+          : null,
     })),
   );
 
   return {
     total: Number(result.hits[0]?.total ?? 0),
+    unit_total: Number(result.hits[0]?.unit_total ?? 0),
     took_ms: Math.round(performance.now() - started),
     hits,
     facets: result.facets,
@@ -116,7 +127,43 @@ async function runSearch(db: DB, q: Query, tokens: string[]) {
     UNION ALL SELECT 'series', series, count(*)::int FROM matched WHERE series <> '' GROUP BY series
     UNION ALL SELECT 'condition', condition, count(*)::int FROM matched GROUP BY condition
   `;
-  const hitsQuery = sql<HitRow>`
+  const thumbFor = (unitRef: RawBuilder<unknown>) => sql`(
+    SELECT p.thumb_key FROM unit_photos up JOIN photos p ON p.id = up.photo_id
+     WHERE up.unit_id = ${unitRef} ORDER BY up.role = 'intake' DESC, up.created_at LIMIT 1)`;
+
+  const hitsQuery =
+    q.group === "series"
+      ? // One result per series; units without a series stay single. The representative
+        // unit is the first by name, and the card shows up to four photos.
+        sql<HitRow>`
+    ${ctes},
+    filtered AS (SELECT * FROM matched WHERE true ${chips}),
+    groups AS (
+      SELECT CASE WHEN series <> '' THEN 's:' || series ELSE 'u:' || id END AS gkey,
+             count(*)::int AS group_count,
+             max(rank) AS grank,
+             max(created_at) AS gcreated,
+             min(lower(item_name)) AS gname,
+             (array_agg(id ORDER BY lower(item_name), id))[1:4] AS sample_ids,
+             array_agg(DISTINCT location_id) FILTER (WHERE location_id IS NOT NULL) AS loc_ids,
+             count(*) FILTER (WHERE needs_review)::int AS group_flagged
+        FROM filtered GROUP BY 1
+    ),
+    gpage AS (
+      SELECT *, count(*) OVER () AS total, sum(group_count) OVER () AS unit_total FROM groups
+       ORDER BY ${q.sort === "newest" ? sql`gcreated DESC, gkey` : q.sort === "name" ? sql`gname, gkey` : sql`grank DESC, gcreated DESC, gkey`}
+       LIMIT ${q.limit} OFFSET ${q.offset}
+    )
+    SELECT f.*, g.total, g.unit_total, g.group_count, g.group_flagged, g.grank, g.gcreated, g.gname, g.gkey,
+           l.path AS location_path, ${thumbFor(sql`f.id`)} AS thumb_key,
+           (SELECT array_agg(path ORDER BY path) FROM locations WHERE id = ANY(g.loc_ids)) AS group_paths,
+           (SELECT array_agg(${thumbFor(sql`s.uid`)} ORDER BY s.ord) FROM unnest(g.sample_ids) WITH ORDINALITY AS s(uid, ord)) AS group_thumbs
+      FROM gpage g
+      JOIN filtered f ON f.id = g.sample_ids[1]
+      LEFT JOIN locations l ON l.id = f.location_id
+     ORDER BY ${q.sort === "newest" ? sql`g.gcreated DESC, g.gkey` : q.sort === "name" ? sql`g.gname, g.gkey` : sql`g.grank DESC, g.gcreated DESC, g.gkey`}
+  `
+      : sql<HitRow>`
     ${ctes},
     page AS (
       SELECT *, count(*) OVER () AS total FROM matched
@@ -124,13 +171,9 @@ async function runSearch(db: DB, q: Query, tokens: string[]) {
        ORDER BY ${order}
        LIMIT ${q.limit} OFFSET ${q.offset}
     )
-    SELECT page.*, l.path AS location_path, t.thumb_key
+    SELECT page.*, page.total AS unit_total, l.path AS location_path, ${thumbFor(sql`page.id`)} AS thumb_key
       FROM page
       LEFT JOIN locations l ON l.id = page.location_id
-      LEFT JOIN LATERAL (
-        SELECT p.thumb_key FROM unit_photos up JOIN photos p ON p.id = up.photo_id
-         WHERE up.unit_id = page.id ORDER BY up.role = 'intake' DESC, up.created_at LIMIT 1
-      ) t ON true
      ORDER BY ${order}
   `;
 
@@ -181,4 +224,9 @@ interface HitRow {
   location_path: string | null;
   thumb_key: string | null;
   total: string;
+  unit_total: string;
+  group_count?: number;
+  group_flagged?: number;
+  group_thumbs?: (string | null)[] | null;
+  group_paths?: string[] | null;
 }

@@ -83,6 +83,32 @@ describe("search", () => {
   });
 });
 
+describe("grouping by series", () => {
+  it("returns one result for a series with many units, and units without a series stay single", async () => {
+    const photos = await registerUploaded(ctx, 3);
+    await intake(
+      ctx,
+      shelf,
+      photos.map((p, i) =>
+        extraction([p], { item_name: `J Stars WCF No.00${i + 1}`, series: "J Stars World Collectable Figure", brand: "Banpresto", category: "Action figure", ocr_text: [] }),
+      ),
+    );
+    const flat = (await get("/v1/search?q=j%20stars")).json();
+    expect(flat.total).toBe(3);
+
+    const grouped = (await get("/v1/search?q=j%20stars&group=series")).json();
+    expect(grouped).toMatchObject({ total: 1, unit_total: 3 });
+    expect(grouped.hits[0].item_name).toBe("J Stars WCF No.001"); // first by name represents the group
+    expect(grouped.hits[0].group).toMatchObject({ series: "J Stars World Collectable Figure", count: 3, location_paths: ["Old House › Garage › Shelf A"] });
+    expect(grouped.hits[0].group.thumb_urls).toHaveLength(3);
+
+    const all = (await get("/v1/search?group=series&limit=100")).json();
+    const singles = all.hits.filter((h: { group: unknown }) => !h.group);
+    expect(all.unit_total).toBe(all.hits.reduce((n: number, h: { group?: { count: number } | null }) => n + (h.group?.count ?? 1), 0));
+    expect(singles.some((h: { series: string }) => h.series === "")).toBe(true);
+  });
+});
+
 describe("catalogue", () => {
   it("saves idempotently and finds by normalised model number", async () => {
     const body = {
