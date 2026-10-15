@@ -7,6 +7,7 @@ import {
   CatalogSaveRequest,
   CatalogUpdateRequest,
   IntakeBatchRequest,
+  LocationCorrectRequest,
   LocationResolveRequest,
   PhotoRegisterRequest,
   PresignRequest,
@@ -29,6 +30,7 @@ import {
   requireWriter,
 } from "./auth.js";
 import { findCandidates } from "./candidates.js";
+import { correctLocation } from "./corrections.js";
 import { findCatalog, saveCatalog } from "./catalog.js";
 import { type DB, phashToBits } from "./db.js";
 import { HttpError } from "./errors.js";
@@ -173,7 +175,11 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
         return { photos: out };
       });
 
-      v1.post("/locations/resolve", async (req) => resolveLocationPath(db, LocationResolveRequest.parse(req.body).path));
+      v1.post("/locations/resolve", async (req) => {
+        const body = LocationResolveRequest.parse(req.body);
+        return resolveLocationPath(db, body.path, body.create);
+      });
+      v1.post("/locations/correct", async (req) => correctLocation(db, LocationCorrectRequest.parse(req.body)));
       v1.post("/intake-batches", async (req) => commitIntakeBatch(db, storage, IntakeBatchRequest.parse(req.body)));
       v1.post("/catalog", async (req) => saveCatalog(db, CatalogSaveRequest.parse(req.body)));
       v1.post<{ Params: { id: string } }>("/batches/:id/undo", async (req) => undoBatch(db, req.params.id));

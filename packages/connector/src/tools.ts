@@ -437,4 +437,25 @@ export function registerTools(server: McpServer, svc: ConnectorService) {
     },
     ({ catalog_item_id, ...body }) => run(async () => [text(await svc.updateCatalog(catalog_item_id, body))]),
   );
+
+  server.registerTool(
+    "location_correct",
+    {
+      title: "Correct a recorded location",
+      description:
+        "Use when toys were RECORDED at the wrong location (a typo or wrong path at intake), not when they were " +
+        "physically moved. Moves every active unit recorded at 'from' (or only the given unit_ids) to 'to' with an " +
+        "ADJUST movement carrying the reason, in one batch that can be undone with undo_batch. 'from' must already " +
+        "exist; 'to' is created if needed. Confirm the exact paths and how many units with the operator first, then " +
+        "report the batch ID. " +
+        NO_INVENTED_IDS,
+      inputSchema: {
+        from: z.string().min(1).describe("Wrong path as recorded, e.g. 'Mirae › Office'"),
+        to: z.string().min(1).describe("Correct path, e.g. 'Green Garden › Mirae'"),
+        unit_ids: z.array(z.string().regex(/^TV-\d{6,}$/)).optional().describe("Only these units; omit for all units at 'from'"),
+        reason: z.string().min(3).default("recorded at the wrong location"),
+      },
+    },
+    (input) => run(async () => [text(await svc.correctLocation(input))]),
+  );
 }

@@ -9,6 +9,7 @@ COMMANDS (first line of the operator's message)
 - "Where is …" (text or an attached photo) — search; nothing is recorded.
 - "Review" / "Review flagged" / "Verify products" / "Check low-confidence" — work through a review queue.
 - "Undo batch <B-id>" — reverse that batch (undo_batch). Only when the operator asks.
+- "Correct location: <wrong path> → <right path>" — toys were recorded at the wrong place (location_correct).
 
 INTAKE PROCEDURE
 1. location_resolve the location. inbox_next_batch(folder=<date>).

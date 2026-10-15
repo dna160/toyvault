@@ -124,6 +124,21 @@ export class ConnectorService {
     return this.api.undoBatch(batchId);
   }
 
+  /** Units recorded at the wrong place: resolve both paths (the source must exist) and correct. */
+  async correctLocation(input: { from: string; to: string; unit_ids?: string[]; reason: string; instruction?: string }) {
+    const from = await this.api.resolveLocation(input.from, false);
+    const to = await this.api.resolveLocation(input.to, true);
+    const units = input.unit_ids ? [...input.unit_ids].sort() : ["all"];
+    return this.api.correctLocation({
+      client_key: deterministicUuid(`correct|${from.id}|${to.id}|${units.join(",")}|${input.reason}`),
+      from_location_id: from.id,
+      to_location_id: to.id,
+      unit_ids: input.unit_ids,
+      reason: input.reason,
+      instruction: input.instruction ?? "",
+    });
+  }
+
   async reviewList(kind: ReviewKind, limit: number, offset: number) {
     const [summary, list] = await Promise.all([this.api.reviewSummary(), this.api.reviews(kind, limit, offset)]);
     if (list.items.length === 0) return { summary, list, sheet: null };

@@ -10,12 +10,22 @@ const searchHref = (n: LocationNode) => `/?location=${n.id}&loc_path=${encodeURI
 
 export function Locations() {
   const q = useQuery({ queryKey: ["locations"], queryFn: api.locations });
+  const [showEmpty, setShowEmpty] = useState(false);
   if (q.isPending) return <Loading />;
   if (q.isError) return <Empty title="Can’t load locations">{(q.error as Error).message}</Empty>;
 
   const roots = q.data.roots;
   const pinned = roots.filter((r) => r.kind === "virtual" && r.path !== "Disposed");
-  const real = roots.filter((r) => r.kind !== "virtual");
+  // Places that no longer hold anything (e.g. after a location correction) stay in the
+  // ledger for history but are hidden unless asked for.
+  const prune = (n: LocationNode): LocationNode | null =>
+    showEmpty || n.subtree_count > 0
+      ? { ...n, children: n.children.map(prune).filter((c): c is LocationNode => c !== null) }
+      : null;
+  const allReal = roots.filter((r) => r.kind !== "virtual");
+  const real = allReal.map(prune).filter((r): r is LocationNode => r !== null);
+  const countEmpty = (n: LocationNode): number => (n.subtree_count === 0 ? 1 : 0) + n.children.reduce((s, c) => s + countEmpty(c), 0);
+  const emptyCount = allReal.reduce((s, r) => s + countEmpty(r), 0);
   const disposed = roots.find((r) => r.path === "Disposed");
 
   return (
@@ -40,6 +50,11 @@ export function Locations() {
         )}
       </div>
 
+      {emptyCount > 0 && (
+        <button type="button" onClick={() => setShowEmpty(!showEmpty)} className="mt-3 block text-sm text-muted hover:underline">
+          {showEmpty ? "Hide empty locations" : `Show ${emptyCount} empty location${emptyCount === 1 ? "" : "s"}`}
+        </button>
+      )}
       {disposed && disposed.subtree_count > 0 && (
         <Link href={searchHref(disposed)} className="mt-3 block text-sm text-muted hover:underline">
           {fmtNum(disposed.subtree_count)} disposed or undone units are kept for history.

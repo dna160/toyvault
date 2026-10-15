@@ -1,7 +1,7 @@
 import { PATH_SEPARATOR, splitLocationPath } from "@toyvault/shared";
 import { sql } from "kysely";
 import type { DB } from "./db.js";
-import { badRequest } from "./errors.js";
+import { badRequest, notFound } from "./errors.js";
 
 const KIND_BY_DEPTH = ["site", "room", "zone"] as const;
 
@@ -9,7 +9,7 @@ const KIND_BY_DEPTH = ["site", "room", "zone"] as const;
  * Resolve "Old House › Garage › Shelf A" to a location, creating missing levels.
  * Matching is case-insensitive per level; the first spelling used is kept.
  */
-export async function resolveLocationPath(db: DB, rawPath: string) {
+export async function resolveLocationPath(db: DB, rawPath: string, create = true) {
   const parts = splitLocationPath(rawPath);
   if (parts.length === 0) throw badRequest("location path is empty", [{ path: "path", message: "empty" }]);
 
@@ -22,6 +22,19 @@ export async function resolveLocationPath(db: DB, rawPath: string) {
     for (const [depth, name] of parts.entries()) {
       const path = parentPath ? `${parentPath}${PATH_SEPARATOR}${name}` : name;
       const kind = depth === 0 && parts.length === 1 && isVirtual(name) ? "virtual" : (KIND_BY_DEPTH[depth] ?? "bin");
+      if (!create) {
+        const found = await trx
+          .selectFrom("locations")
+          .select(["id", "path"])
+          .where(sql<boolean>`coalesce(parent_id, '') = ${parentId ?? ""}`)
+          .where(sql<boolean>`lower(name) = lower(${name})`)
+          .executeTakeFirst();
+        if (!found) throw notFound(`no location "${parts.slice(0, depth + 1).join(" › ")}" exists`);
+        parentId = found.id;
+        parentPath = found.path;
+        current = found;
+        continue;
+      }
       const inserted = await sql<{ id: string }>`
         INSERT INTO locations (parent_id, name, path, kind)
         VALUES (${parentId}, ${name}, ${path}, ${kind})

@@ -32,12 +32,19 @@ export function Batches() {
               </header>
               {b.instruction && <p className="mt-1 truncate text-sm text-muted">“{b.instruction}”</p>}
 
-              <dl className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
-                <Stat label="Listed" value={b.counts.listed} />
-                <Stat label="Flagged" value={b.counts.flagged} warn />
-                <Stat label="Skipped" value={b.counts.skipped} />
-                <Stat label="Photos" value={b.counts.photos} className="hidden sm:block" />
-              </dl>
+              {b.mode === "correction" ? (
+                <dl className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+                  <Stat label="Location corrected" value={b.counts.corrected} />
+                  <Stat label="Skipped" value={b.counts.skipped} />
+                </dl>
+              ) : (
+                <dl className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+                  <Stat label="Listed" value={b.counts.listed} />
+                  <Stat label="Flagged" value={b.counts.flagged} warn />
+                  <Stat label="Skipped" value={b.counts.skipped} />
+                  <Stat label="Photos" value={b.counts.photos} className="hidden sm:block" />
+                </dl>
+              )}
 
               {b.thumbs.length > 0 && (
                 <div className="mt-3 flex gap-2 overflow-x-auto pb-1">

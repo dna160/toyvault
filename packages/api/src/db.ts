@@ -43,7 +43,7 @@ export interface CatalogItemsTable {
 
 export interface BatchesTable {
   id: Generated<string>;
-  mode: "intake" | "move" | "pack" | "count";
+  mode: "intake" | "move" | "pack" | "count" | "correction";
   folder: Generated<string>;
   instruction: Generated<string>;
   from_location_id: string | null;

@@ -13,6 +13,8 @@ import type {
   UndoResult,
   IntakeBatchRequest,
   IntakeReceipt,
+  LocationCorrectRequest,
+  LocationCorrectResult,
   LocationResolveResponse,
   PhotoRegisterRequest,
   PhotoRegisterResponse,
@@ -50,8 +52,11 @@ export class ApiClient {
   presign(body: PresignRequest) {
     return this.request<PresignResponse>("POST", "/v1/photos/presign", body);
   }
-  resolveLocation(path: string) {
-    return this.request<LocationResolveResponse>("POST", "/v1/locations/resolve", { path });
+  resolveLocation(path: string, create = true) {
+    return this.request<LocationResolveResponse>("POST", "/v1/locations/resolve", { path, create });
+  }
+  correctLocation(body: LocationCorrectRequest) {
+    return this.request<LocationCorrectResult>("POST", "/v1/locations/correct", body);
   }
   commitIntake(body: IntakeBatchRequest) {
     return this.request<IntakeReceipt>("POST", "/v1/intake-batches", body);

@@ -91,7 +91,7 @@ export type PresignResponse = z.infer<typeof PresignResponse>;
 
 // ---------- Locations ----------
 
-export const LocationResolveRequest = z.object({ path: z.string().min(1) });
+export const LocationResolveRequest = z.object({ path: z.string().min(1), create: z.boolean().default(true) });
 export const LocationResolveResponse = z.object({
   id: LocationId,
   path: z.string(),
@@ -513,3 +513,26 @@ export const CatalogUpdateRequest = z.object({
   reason: z.string().max(500).optional(),
 });
 export type CatalogUpdateRequest = z.input<typeof CatalogUpdateRequest>;
+
+// ---------- Location corrections ----------
+
+export const LocationCorrectRequest = z.object({
+  client_key: z.string().min(8).max(128),
+  from_location_id: LocationId,
+  to_location_id: LocationId,
+  /** Only these units; omitted = every active unit recorded directly at from_location_id. */
+  unit_ids: z.array(UnitId).max(5000).optional(),
+  reason: z.string().min(3).max(500),
+  instruction: z.string().default(""),
+});
+export type LocationCorrectRequest = z.input<typeof LocationCorrectRequest>;
+
+export const LocationCorrectResult = z.object({
+  batch_id: BatchId,
+  from_path: z.string(),
+  to_path: z.string(),
+  corrected: z.array(UnitId),
+  skipped: z.array(z.object({ unit_id: UnitId, reason: z.string() })),
+  replayed: z.boolean(),
+});
+export type LocationCorrectResult = z.infer<typeof LocationCorrectResult>;
